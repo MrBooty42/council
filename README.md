@@ -10,6 +10,8 @@ Ask one question and two AIs work it out. Claude and Gemini each answer on their
 3. **Revise:** each concedes or defends, then improves its answer. Quick runs this once, Standard twice, Deep three times. It stops early if both fully agree.
 4. **Verdict:** one model merges the best of both into a single answer.
 
+**Power:** Auto (default) has a tiny model read each question and pick Economy (Claude Sonnet 5.5 + Gemini 3.8 Flash) for everyday questions or Max (Claude Opus 5.5 + Gemini 4 Argon) for hard or high-stakes ones. You can also force Economy or Max.
+
 Also: PDF, Word, PowerPoint and photo uploads; solo mode (one model, much cheaper); a monthly spend tracker; Download for Word; history backup.
 
 ## Privacy

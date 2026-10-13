@@ -227,6 +227,13 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
             <option value="decision">Life decision</option>
           </select>
         </label>
+        <label title="Auto uses the cheaper models for everyday questions and the strongest ones for hard questions">Power
+          <select id="powerSel" aria-label="Power">
+            <option value="auto">Auto</option>
+            <option value="economy">Economy</option>
+            <option value="max">Max</option>
+          </select>
+        </label>
         <span class="seg" id="whoSeg" role="group" aria-label="Who answers">
           <button data-who="council" aria-pressed="true" title="Both models debate">Both</button>
           <button data-who="claude" aria-pressed="false" title="Claude answers alone, much cheaper">Claude</button>
@@ -266,19 +273,11 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
     </div>
     <div class="row2">
       <div class="field">
-        <label for="geminiModel">Gemini model</label>
+        <label for="geminiModel">Gemini model for Max power</label>
         <select id="geminiModel">
           <option value="gemini-4-argon">Gemini 4 Argon (strongest)</option>
           <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
           <option value="gemini-3.8-flash">Gemini 3.8 Flash (cheap, free tier)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="effort">Claude thinking depth</label>
-        <select id="effort">
-          <option value="medium">Medium (faster)</option>
-          <option value="high">High</option>
-          <option value="xhigh">Extra high (slowest)</option>
         </select>
       </div>
     </div>
@@ -327,7 +326,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", effort: "high", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council" };
+const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", power: "auto", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council" };
 let settings = Object.assign({}, DEFAULT_SETTINGS, store.get("council.settings", {}));
 let convos = store.get("council.convos", []);
 let activeId = store.get("council.active", null);
@@ -359,9 +358,19 @@ function renderSpend() {
 }
 
 /* ---------- Models and prices (USD per 1M tokens) ---------- */
-const CLAUDE_MODEL = "claude-opus-5-5";
+// Economy handles everyday questions at about a quarter of Max's cost; Max is for hard, high-stakes ones.
+const TIERS = {
+  economy: { model: "claude-sonnet-5-5", effort: "medium", label: "Sonnet 5.5" },
+  max: { model: "claude-opus-5-5", effort: "high", label: "Opus 5.5" },
+};
+const ROUTER_MODEL = "claude-haiku-5-5";
+const GEMINI_ECONOMY = "gemini-3.8-flash";
+const geminiFor = tier => (tier === "max" ? settings.geminiModel : GEMINI_ECONOMY);
+const GEMINI_LABELS = { "gemini-4-argon": "Gemini 4 Argon", "gemini-3.1-pro-preview": "Gemini 3.1 Pro", "gemini-3.8-flash": "Gemini 3.8 Flash" };
 const PRICES = {
   "claude-opus-5-5": { in: 4, out: 20 },
+  "claude-sonnet-5-5": { in: 2, out: 10 },
+  "claude-haiku-5-5": { in: 0.1, out: 0.5 },
   "gemini-4-argon": { in: 2, out: 10 },
   "gemini-3.1-pro-preview": { in: 2, out: 12 },
   "gemini-3.8-flash": { in: 0.75, out: 3.75 },
@@ -420,18 +429,19 @@ function claudeContent(prompt, files) {
   parts.push({ type: "text", text: prompt });
   return parts;
 }
-async function callClaude({ system, prompt, search, onText, signal, files }) {
+async function callClaude({ system, prompt, search, onText, signal, files, tier }) {
+  tier = tier || TIERS.max;
   const messages = [{ role: "user", content: claudeContent(prompt, files) }];
   const usage = { in: 0, out: 0, searches: 0 };
   const sources = [];
   let text = "";
   for (let hop = 0; hop < 4; hop++) {
     const body = {
-      model: CLAUDE_MODEL, max_tokens: 32000, stream: true,
-      thinking: { type: "adaptive" }, output_config: { effort: settings.effort },
+      model: tier.model, max_tokens: 32000, stream: true,
+      thinking: { type: "adaptive" }, output_config: { effort: tier.effort },
       fallbacks: "default", system, messages,
     };
-    if (search) body.tools = [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }];
+    if (search > 0) body.tools = [{ type: "web_search_20260209", name: "web_search", max_uses: search }];
     let res;
     for (let attempt = 0; attempt < 3; attempt++) {
       res = await safeFetch("https://api.anthropic.com/v1/messages", {
@@ -484,13 +494,14 @@ async function callClaude({ system, prompt, search, onText, signal, files }) {
     if (stop === "pause_turn") { messages.push({ role: "assistant", content: blocks.filter(Boolean) }); continue; }
     break;
   }
-  const cost = (usage.in * PRICES[CLAUDE_MODEL].in + usage.out * PRICES[CLAUDE_MODEL].out) / 1e6 + usage.searches * CLAUDE_SEARCH_PRICE;
+  const pr = PRICES[tier.model];
+  const cost = (usage.in * pr.in + usage.out * pr.out) / 1e6 + usage.searches * CLAUDE_SEARCH_PRICE;
   return { text: text.trim(), sources, cost };
 }
 
 /* ---------- Gemini ---------- */
-async function callGemini({ system, prompt, search, onText, signal, files }) {
-  const model = settings.geminiModel;
+async function callGemini({ system, prompt, search, onText, signal, files, gmodel }) {
+  const model = gmodel || settings.geminiModel;
   const parts = [];
   for (const f of files || []) {
     if (f.kind === "text") parts.push({ text: `Attached file "${f.name}":\n${f.text}` });
@@ -502,7 +513,7 @@ async function callGemini({ system, prompt, search, onText, signal, files }) {
     contents: [{ role: "user", parts }],
     generationConfig: { maxOutputTokens: 32768 },
   };
-  if (search) body.tools = [{ google_search: {} }];
+  if (search > 0) body.tools = [{ google_search: {} }];
   let res;
   for (let attempt = 0; attempt < 3; attempt++) {
     res = await safeFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
@@ -589,12 +600,43 @@ let running = null; // AbortController while a debate runs
 
 function call(who, opts) { return who === "claude" ? callClaude(opts) : callGemini(opts); }
 
+// Auto power: a very cheap model reads the question and decides whether it needs Max.
+async function pickTier(turn, signal) {
+  if (turn.power !== "auto") return { tier: turn.power, cost: 0 };
+  if (!settings.claudeKey) return { tier: "economy", cost: 0 };
+  const prompt = `Decide how much reasoning power this question needs. Reply with exactly one word: HEAVY or LIGHT.
+
+HEAVY: hard multi-step reasoning, advanced math, science or technical work, rigorous research across many sources, long or several attached documents, or high-stakes choices (large sums of money, legal, medical, signing contracts, major life decisions).
+LIGHT: everything else, including everyday facts, explanations, writing help, quick business questions and summaries of a short file.
+
+Mode: ${turn.mode}. Attached files: ${turn.files?.length || 0}.
+Question: ${turn.q.slice(0, 4000)}`;
+  try {
+    const res = await safeFetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", signal,
+      headers: { "content-type": "application/json", "x-api-key": settings.claudeKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: ROUTER_MODEL, max_tokens: 10, thinking: { type: "disabled" }, output_config: { effort: "low" }, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!res.ok) throw await readError(res, "Claude");
+    const j = await res.json();
+    const word = (j.content || []).map(b => b.text || "").join("").toUpperCase();
+    const cost = ((j.usage?.input_tokens || 0) * PRICES[ROUTER_MODEL].in + (j.usage?.output_tokens || 0) * PRICES[ROUTER_MODEL].out) / 1e6;
+    return { tier: word.includes("HEAVY") ? "max" : "economy", cost };
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    if (e.status === 401 || e.status === 403) throw e;
+    return { tier: "economy", cost: 0 };
+  }
+}
+
 async function runCouncil(convo, turnIndex) {
   const turn = convo.turns[turnIndex];
   const ctx = contextBlock(convo, turnIndex);
   const q = turn.q;
   const search = turn.search;
   const signal = running.signal;
+  // Searches per call: they add cost on every step, so only the steps that state or check facts get them.
+  const S = { opening: search ? 3 : 0, critique: search ? 2 : 0, solo: search ? 4 : 0 };
   turn.cost = 0;
   turn.costBy = { claude: 0, gemini: 0 };
 
@@ -607,7 +649,7 @@ async function runCouncil(convo, turnIndex) {
     const runOne = async who => {
       try {
         const r = await call(who, {
-          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files,
+          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files, tier: TIERS[turn.claudeTier], gmodel: turn.geminiModel,
           onText: t => { step[who].text = t; view.updateVoice(step, who); },
         });
         step[who].text = r.text; step[who].sources = r.sources; step[who].cost = r.cost; turn.cost += r.cost; turn.costBy[who] += r.cost;
@@ -630,13 +672,18 @@ async function runCouncil(convo, turnIndex) {
 
   try {
     const files = turn._files || [];
+    view.status("Choosing how much power this question needs");
+    const pick = await pickTier(turn, signal);
+    turn.claudeTier = pick.tier; turn.geminiModel = geminiFor(pick.tier);
+    turn.cost += pick.cost; turn.costBy.claude += pick.cost;
+    view.tier();
     if (turn.who !== "council") {
       const solo = turn.who;
       view.status(`${NAMES[solo]} is answering alone`);
       turn.final = { text: "", by: solo };
       view.showFinal();
       const r = await call(solo, {
-        system: systemFor(solo, turn), prompt: P.solo(ctx, q), search, signal, files,
+        system: systemFor(solo, turn), prompt: P.solo(ctx, q), search: S.solo, signal, files, tier: TIERS[turn.claudeTier], gmodel: turn.geminiModel,
         onText: t => { turn.final.text = t; view.updateFinal(); },
       });
       turn.cost += r.cost; turn.costBy[solo] += r.cost;
@@ -648,16 +695,16 @@ async function runCouncil(convo, turnIndex) {
     }
     view.status("Opening statements: both models are answering");
     // Files go to the opening and critique steps, where facts get stated and checked.
-    let ans = await pairStep("Opening statements", "opening", () => P.opening(ctx, q), search, files);
+    let ans = await pairStep("Opening statements", "opening", () => P.opening(ctx, q), S.opening, files);
     let lastCrit = { claude: "", gemini: "" };
     const rounds = turn.depth;
     for (let r = 1; r <= rounds; r++) {
       view.status(`Round ${r} of ${rounds}: cross-examining`);
       const crit = await pairStep(`Round ${r} · Critique`, "critique",
-        who => P.critique(ctx, q, ans[who], ans[OTHER[who]], NAMES[OTHER[who]]), search, files);
+        who => P.critique(ctx, q, ans[who], ans[OTHER[who]], NAMES[OTHER[who]]), S.critique, files);
       view.status(`Round ${r} of ${rounds}: revising`);
       const rev = await pairStep(`Round ${r} · Rebuttal and revision`, "revise",
-        who => P.revise(ctx, q, ans[who], crit[OTHER[who]], ans[OTHER[who]], NAMES[OTHER[who]]), search);
+        who => P.revise(ctx, q, ans[who], crit[OTHER[who]], ans[OTHER[who]], NAMES[OTHER[who]]), 0);
       lastCrit = crit;
       const stances = { claude: stanceOf(rev.claude), gemini: stanceOf(rev.gemini) };
       ans = { claude: revisedPart(rev.claude), gemini: revisedPart(rev.gemini) };
@@ -671,7 +718,7 @@ async function runCouncil(convo, turnIndex) {
     turn.final = { text: "", by: judge };
     view.showFinal();
     const fin = await call(judge, {
-      system: systemFor(judge, turn), search: false, signal,
+      system: systemFor(judge, turn), search: 0, signal, tier: TIERS[turn.claudeTier], gmodel: turn.geminiModel,
       prompt: P.final(ctx, q, ans.claude, ans.gemini, lastCrit.claude, lastCrit.gemini),
       onText: t => { turn.final.text = t; view.updateFinal(); },
     });
@@ -825,7 +872,9 @@ function renderTurn(convo, index, live) {
       const meta = el("div", "meta");
       const modeName = { general: "", research: "Research", study: "Study", business: "Business", decision: "Life decision" }[t.mode || "general"];
       const how = t.who && t.who !== "council" ? `Answered by ${NAMES[t.who]} alone` : `Final draft by ${NAMES[t.final.by] || "Claude"} · ${["", "Quick", "Standard", "Deep"][t.depth]} debate`;
-      meta.appendChild(el("span", null, how + (modeName ? ` · ${modeName} mode` : "")));
+      const models = [t.who !== "gemini" && TIERS[t.claudeTier]?.label, t.who !== "claude" && GEMINI_LABELS[t.geminiModel]].filter(Boolean).join(" + ");
+      const tierName = t.claudeTier ? ` · ${t.claudeTier === "max" ? "Max" : "Economy"} power${t.power === "auto" ? " (auto)" : ""}: ${models}` : "";
+      meta.appendChild(el("span", null, how + (modeName ? ` · ${modeName} mode` : "") + tierName));
       const spend = el("span", "spend");
       spend.append("Spent ≈ ", el("b", null, money(t.cost || 0)));
       if (t.costBy && (!t.who || t.who === "council")) {
@@ -868,6 +917,7 @@ function renderTurn(convo, index, live) {
     updateVoice(step, who) { voiceEls.get(step)?.[who].draw(); },
     status(text, finished) { status.textContent = text; if (finished) { pulse.hidden = true; } },
     note(text) { t.note = text; steps.appendChild(el("div", "note", text)); },
+    tier() { if (t.claudeTier) status.textContent = `${t.claudeTier === "max" ? "Max" : "Economy"} power${t.power === "auto" ? " (picked automatically)" : ""}`; },
     showFinal() { finalBox.hidden = false; det.open = false; drawFinal(); scrollToEnd(); },
     updateFinal(now) { now ? drawFinal() : drawFinalT(); },
     error(msg) { errBox.hidden = false; errBox.textContent = msg; det.open = true; },
@@ -991,7 +1041,7 @@ async function ask() {
     convos.unshift(c); activeId = c.id;
   }
   const files = pending; pending = []; renderChips();
-  c.turns.push({ q, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who,
+  c.turns.push({ q, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who, power: settings.power,
     files: files.map(f => f.name), _files: files, status: "running" });
   input.value = ""; autosize();
   saveConvos(); renderList();
@@ -1009,12 +1059,14 @@ $("#whoSeg").addEventListener("click", e => {
   settings.who = b.dataset.who; saveSettings(); syncOpts();
 });
 $("#modeSel").addEventListener("change", e => { settings.mode = e.target.value; saveSettings(); });
+$("#powerSel").addEventListener("change", e => { settings.power = e.target.value; saveSettings(); });
 $("#searchToggle").addEventListener("change", e => { settings.search = e.target.checked; saveSettings(); });
 function syncOpts() {
   document.querySelectorAll("#depthSeg button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.depth === settings.depth)));
   document.querySelectorAll("#whoSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.who === settings.who)));
   $("#depthSeg").hidden = settings.who !== "council";
   $("#modeSel").value = settings.mode;
+  $("#powerSel").value = settings.power;
   $("#searchToggle").checked = settings.search;
   input.placeholder = settings.who === "council" ? "Ask the council anything…" : `Ask ${NAMES[settings.who]} anything…`;
 }
@@ -1063,7 +1115,7 @@ function renderList() {
 /* ---------- Settings ---------- */
 function openSettings() {
   $("#claudeKey").value = settings.claudeKey; $("#geminiKey").value = settings.geminiKey;
-  $("#geminiModel").value = settings.geminiModel; $("#effort").value = settings.effort; $("#judge").value = settings.judge;
+  $("#geminiModel").value = settings.geminiModel; $("#judge").value = settings.judge;
   $("#about").value = settings.about; $("#budget").value = settings.budget;
   $("#settings").hidden = false; $("#scrim").hidden = false; $("#claudeKey").focus();
 }
@@ -1072,7 +1124,7 @@ $("#settingsBtn").onclick = openSettings;
 $("#settingsCancel").onclick = closeSettings;
 $("#settingsSave").onclick = () => {
   settings.claudeKey = $("#claudeKey").value.trim(); settings.geminiKey = $("#geminiKey").value.trim();
-  settings.geminiModel = $("#geminiModel").value; settings.effort = $("#effort").value; settings.judge = $("#judge").value;
+  settings.geminiModel = $("#geminiModel").value; settings.judge = $("#judge").value;
   settings.about = $("#about").value.trim(); settings.budget = Math.max(0, +$("#budget").value || 0);
   saveSettings(); closeSettings(); renderSpend(); if (!activeConvo()) renderThread();
 };
