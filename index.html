@@ -334,7 +334,7 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
         <input id="googleClientId" autocomplete="off" placeholder="…apps.googleusercontent.com">
       </div>
       <div class="field">
-        <label for="googleApiKey">Google API key for the file picker</label>
+        <label for="googleApiKey">Google API key (optional)</label>
         <input id="googleApiKey" type="password" autocomplete="off" placeholder="AIza…">
       </div>
     </div>
@@ -348,7 +348,7 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
       </div>
       <span class="hint">When a question would be better with your own notes, syllabus, price list or drafts, the council searches these places, opens up to 3 matching files (Word, PowerPoint, PDF, Google Docs, Slides, Sheets, text) and uses them. It can only read, never change or delete. Searching all of Drive needs wider Google permission than the Drive button: Google will warn the app isn't verified, and may ask you to sign in again every week. Only file names go to the AI to choose; the chosen files' contents go to both models.</span>
     </div>
-    <span class="hint" id="googleHint" style="margin-top:-8px">Lets you attach files from Google Drive and save results to Google Docs or Slides. The app can only see files you pick or files it creates. One-time setup: <a href="https://github.com/MrBooty42/council#google-drive-setup" target="_blank" rel="noopener">follow these steps</a>.</span>
+    <span class="hint" id="googleHint" style="margin-top:-8px">Lets you attach files from Google Drive and save results to Google Docs or Slides. The API key turns on Google's own file picker, and then the app can only see files you pick or files it creates. If your school won't let you make an API key, leave it blank: the Drive button then shows a simple search list, which needs read access to your Drive. One-time setup: <a href="https://github.com/MrBooty42/council#google-drive-setup" target="_blank" rel="noopener">follow these steps</a>.</span>
     <div class="field">
       <label>History backup</label>
       <div class="backup">
@@ -1590,11 +1590,12 @@ function downloadPptx(t, btn) {
 // Browser sign-in with the drive.file scope: the app sees only files Drew picks or files it creates.
 let gToken = null, gTokenExp = 0, gTokenScope = "";
 const DRIVE_FILE = "https://www.googleapis.com/auth/drive.file", DRIVE_READ = "https://www.googleapis.com/auth/drive.readonly";
-const wantScope = () => settings.driveAuto ? `${DRIVE_FILE} ${DRIVE_READ}` : DRIVE_FILE;
-const googleReady = () => !!(settings.googleClientId && settings.googleApiKey);
+// Without an API key there is no Google Picker, so the Drive button lists files itself, which needs read access.
+const wantScope = () => settings.driveAuto || !settings.googleApiKey ? `${DRIVE_FILE} ${DRIVE_READ}` : DRIVE_FILE;
+const googleReady = () => !!settings.googleClientId;
 function preloadGoogle() {
   loadScript("https://accounts.google.com/gsi/client").catch(() => {});
-  loadScript("https://apis.google.com/js/api.js").then(() => gapi.load("picker", () => {})).catch(() => {});
+  if (settings.googleApiKey) loadScript("https://apis.google.com/js/api.js").then(() => gapi.load("picker", () => {})).catch(() => {});
 }
 async function googleToken() {
   if (gToken && gTokenScope === wantScope() && Date.now() < gTokenExp - 60000) return gToken;
@@ -1644,10 +1645,60 @@ async function driveFile(doc, token) {
   }
   throw await driveError(res);
 }
+// A small Drive search list, used when there is no API key for Google's picker.
+function driveBrowser(token) {
+  return new Promise(resolve => {
+    const wrap = el("div", "dialog"); wrap.id = "driveDialog"; wrap.setAttribute("role", "dialog"); wrap.setAttribute("aria-modal", "true");
+    const card = el("div", "card"); wrap.appendChild(card);
+    card.appendChild(el("h2", null, "Attach from Google Drive"));
+    const q = el("input"); q.type = "search"; q.placeholder = "Search your Drive";
+    q.style.cssText = "border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg);width:100%";
+    const list = el("div"); list.style.cssText = "display:flex;flex-direction:column;gap:2px;min-height:120px";
+    const actions = el("div", "actions");
+    const cancel = el("button", "plain", "Cancel"), attach = el("button", "primary", "Attach");
+    actions.append(cancel, attach); card.append(q, list, actions);
+    document.body.appendChild(wrap); $("#scrim").hidden = false; q.focus();
+    const picked = new Map();
+    const close = docs => { wrap.remove(); if ($("#drawer").hidden && $("#settings").hidden) $("#scrim").hidden = true; resolve(docs); };
+    let seq = 0;
+    async function load() {
+      const my = ++seq; list.textContent = "Searching…";
+      const term = q.value.trim().replace(/[\\']/g, " ");
+      const filter = `trashed = false and mimeType != 'application/vnd.google-apps.folder'` + (term ? ` and (name contains '${term}' or fullText contains '${term}')` : "");
+      try {
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?pageSize=25&fields=files(id,name,mimeType,modifiedTime)&q=${encodeURIComponent(filter)}` + (term ? "" : "&orderBy=modifiedTime desc"), { headers: { Authorization: "Bearer " + token } });
+        if (!res.ok) throw await driveError(res);
+        const files = (await res.json()).files || [];
+        if (my !== seq) return;
+        list.innerHTML = "";
+        if (!files.length) list.textContent = "Nothing found.";
+        for (const f of files) {
+          const row = el("label", "check"); row.style.cssText = "display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--line);font-size:14px";
+          const cb = el("input"); cb.type = "checkbox"; cb.checked = picked.has(f.id);
+          cb.onchange = () => cb.checked ? picked.set(f.id, f) : picked.delete(f.id);
+          const name = el("span", null, f.name); name.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+          const when = el("span", null, (f.modifiedTime || "").slice(0, 10)); when.style.cssText = "color:var(--muted);font-size:12px";
+          row.append(cb, name, when); list.appendChild(row);
+        }
+      } catch (e) { if (my === seq) list.textContent = e.message; }
+    }
+    let timer; q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(load, 350); });
+    cancel.onclick = () => close([]);
+    attach.onclick = () => close([...picked.values()]);
+    load();
+  }).then(async docs => {
+    if (!docs.length) return;
+    showWarn(`Getting ${docs.length} file${docs.length > 1 ? "s" : ""} from Drive…`);
+    const files = [];
+    for (const d of docs) { try { files.push(await driveFile(d, token)); } catch (e) { showWarn(e.message); } }
+    if (files.length) { if ($("#warn").textContent.startsWith("Getting")) showWarn(""); await addFiles(files); }
+  });
+}
 async function pickFromDrive() {
-  if (!googleReady()) { showWarn("Connect Google first: add your Google client ID and API key in Settings."); openSettings("google"); return; }
+  if (!googleReady()) { showWarn("Connect Google first: add your Google client ID in Settings."); openSettings("google"); return; }
   try {
     const token = await googleToken();
+    if (!settings.googleApiKey) return await driveBrowser(token);
     await loadScript("https://apis.google.com/js/api.js");
     await new Promise(r => gapi.load("picker", r));
     const docs = await new Promise(res => {
@@ -1696,7 +1747,7 @@ async function googleSave(t, kind) {
   return t.saved.url;
 }
 function saveToGoogle(t, kind, btn) {
-  if (!googleReady()) { showWarn("Connect Google first: add your Google client ID and API key in Settings."); openSettings("google"); return; }
+  if (!googleReady()) { showWarn("Connect Google first: add your Google client ID in Settings."); openSettings("google"); return; }
   return busy(btn, "Saving…", async () => {
     await googleToken(); // sign in first, while the click still counts as a click
     await googleSave(t, kind);
@@ -1785,7 +1836,7 @@ $("#settingsSave").onclick = () => {
   if (gid !== settings.googleClientId) gToken = null;
   settings.googleClientId = gid; settings.googleApiKey = $("#googleApiKey").value.trim();
   settings.driveAuto = $("#driveAuto").checked;
-  if (settings.driveAuto && !googleReady()) showWarn("Searching your Drive needs the Google client ID and API key in Settings.");
+  if (settings.driveAuto && !googleReady()) showWarn("Searching your Drive needs the Google client ID in Settings.");
   syncOpts();
   if (googleReady()) preloadGoogle();
   saveSettings(); closeSettings(); renderSpend(); if (!activeConvo()) renderThread();
