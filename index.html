@@ -240,9 +240,9 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
           <button data-who="gemini" aria-pressed="false" title="Gemini answers alone, much cheaper">Gemini</button>
         </span>
         <span class="seg" id="depthSeg" role="group" aria-label="Debate depth">
-          <button data-depth="1" aria-pressed="false" title="1 round of critique">Quick</button>
-          <button data-depth="2" aria-pressed="true" title="2 rounds of critique">Standard</button>
-          <button data-depth="3" aria-pressed="false" title="3 rounds of critique">Deep</button>
+          <button data-depth="1" aria-pressed="false" title="1 round of review">Quick</button>
+          <button data-depth="2" aria-pressed="true" title="Up to 2 rounds of review">Standard</button>
+          <button data-depth="3" aria-pressed="false" title="Up to 3 rounds of review">Deep</button>
         </span>
         <label><input type="checkbox" id="searchToggle" checked> Web search</label>
       </div>
@@ -560,13 +560,14 @@ function systemFor(me, turn) {
   return systemBase(me) + (extra ? "\n\n" + extra : "");
 }
 function systemBase(me) {
-  return `You are ${NAMES[me]}, one of two members of an AI council working for one person, Drew. Your partner is ${NAMES[OTHER[me]]}, built by a different company and trained differently. You debate each question so Drew gets the best possible answer, not the most agreeable one. Drew uses the council for deep research, university study, growing his business and other ventures, and hard everyday decisions. He is a sharp non-programmer who wants direct, useful answers without fluff.
+  return `You are ${NAMES[me]}, one of two members of an AI council working for one person, Drew. Your partner is ${NAMES[OTHER[me]]}, built by a different company and trained differently. You are partners, not competitors: the only goal is the best possible answer or result for Drew. Nobody is keeping score. Drew uses the council for deep research, university study, growing his business and other ventures, and hard everyday decisions. He is a sharp non-programmer who wants direct, useful answers without fluff.
 
-Rules of the council:
-- Truth over harmony. Never agree to be polite. Concede a point only when the argument or evidence actually beats yours, and say what changed your mind.
-- Be specific. Name the exact claim, number or step you dispute and say why.
+How the council works:
+- Agree quickly where you agree. Spend your effort only on points that would change the answer or what Drew should do. Never invent a disagreement, nitpick wording, or argue a point just because it was yours.
+- When your partner is right, take their point without defending your old version. When you think they are wrong on something that matters, say so plainly with the reason or evidence.
+- Be specific. Name the exact claim, number or step and say why.
 - Separate what you know, what you infer, and what you are guessing. Give a confidence level on claims that matter.
-- Check facts that matter when you can search, prefer primary sources, and include links to the sources you rely on.
+- Sources: a few excellent sources beat many weak ones. Prefer primary and authoritative sources: official data and filings, government and university sites, peer-reviewed research, original reporting from established outlets, and the company's or person's own statements. Avoid content farms, SEO listicles, affiliate review sites, anonymous forums and AI-generated pages unless nothing better exists, and say so when you rely on one. Search only when it adds something, and cite only sources that actually support the claim, with links.
 - Write in plain language. No filler, no throat-clearing.`;
 }
 
@@ -578,17 +579,31 @@ function contextBlock(convo, uptoIndex) {
 }
 
 const P = {
-  opening: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nGive your own best answer. Your partner is answering separately at the same time, and next you will critique each other, so commit to clear positions instead of hedging. End with a short list of the claims you are least sure about.`,
-  critique: (ctx, q, mine, theirs, other) => `${ctx}Drew's question:\n${q}\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nYour own current answer, for reference:\n<<<\n${mine}\n>>>\n\nCritique ${other}'s answer hard. Look for factual errors, weak or missing evidence, flawed reasoning, important things it leaves out, and advice that would not survive real life. Verify doubtful claims if you can search. Rank the problems by how much they would hurt Drew if he acted on the answer. Then say briefly what it gets right that your answer missed. Do not rewrite either answer yet.`,
-  revise: (ctx, q, mine, critique, theirs, other) => `${ctx}Drew's question:\n${q}\n\nYour current answer:\n<<<\n${mine}\n>>>\n\n${other}'s critique of your answer:\n<<<\n${critique}\n>>>\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nFirst, under "## Response to critique", go through the critique point by point: concede what is right and push back on what is wrong, with reasons. Then write your complete improved answer under "## Revised answer", taking anything better from ${other}'s answer. On the very last line write exactly one of these and nothing else:\nSTANCE: AGREE (you would sign ${other}'s answer as it stands)\nSTANCE: MOSTLY AGREE\nSTANCE: DISAGREE`,
+  opening: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nGive your own best answer. Your partner is answering separately at the same time, and next you will review each other's work, so commit to clear positions instead of hedging. End with a short list of the claims you are least sure about.`,
+  critique: (ctx, q, mine, theirs, other) => `${ctx}Drew's question:\n${q}\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nYour own current answer, for reference:\n<<<\n${mine}\n>>>\n\nReview ${other}'s answer as a teammate whose only goal is the best answer for Drew. Start with one or two lines on what you agree with; do not argue those points. Then list only the problems that matter: factual errors, weak or low-quality sources, flawed reasoning, important gaps, or advice that would not survive real life. Rank them by how much they would hurt Drew if he acted on the answer, and skip anything minor or stylistic. Verify a doubtful claim with a search only if it matters. Mention anything it gets right that your answer missed. Do not rewrite either answer.\n\nOn the very last line write exactly one of these and nothing else:\nVERDICT: NO MAJOR ISSUES\nVERDICT: ISSUES FOUND`,
+  revise: (ctx, q, mine, critique, theirs, other) => `${ctx}Drew's question:\n${q}\n\nYour current answer:\n<<<\n${mine}\n>>>\n\n${other}'s review of your answer:\n<<<\n${critique}\n>>>\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nFirst, under "## Response to review", go through the points briefly: accept what is right without defending your old wording, and push back only where you have a real reason. Then write your complete improved answer under "## Revised answer", taking anything better from ${other}'s answer. On the very last line write exactly one of these and nothing else:\nSTANCE: AGREE (you would sign ${other}'s answer as it stands)\nSTANCE: MOSTLY AGREE\nSTANCE: DISAGREE`,
   solo: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nThis time you are answering alone, without your partner, so check your own work: verify claims that matter and say where you are unsure.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nKeep links to the sources behind the key claims.`,
-  final: (ctx, q, a, b, ca, cb) => `${ctx}Drew's question:\n${q}\n\nThe debate is over. Here is where it ended.\n\nClaude's final answer:\n<<<\n${a}\n>>>\n\nGemini's final answer:\n<<<\n${b}\n>>>\n\nClaude's last critique of Gemini:\n<<<\n${ca}\n>>>\n\nGemini's last critique of Claude:\n<<<\n${cb}\n>>>\n\nWrite the council's single final answer for Drew. Be fair: build it from the strongest parts of both answers, not from your own by default, and drop anything that was shown to be wrong.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- Then "## Where the council disagrees", only if a real disagreement remains. State each side in a sentence, and which one you would bet on and why. Leave this section out if they agree.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nDo not describe the debate or mention rounds. Keep links to the sources behind the key claims.`,
+  final: (ctx, q, a, b, ca, cb) => `${ctx}Drew's question:\n${q}\n\nThe debate is over. Here is where it ended.\n\nClaude's final answer:\n<<<\n${a}\n>>>\n\nGemini's final answer:\n<<<\n${b}\n>>>\n\nClaude's last review of Gemini:\n<<<\n${ca}\n>>>\n\nGemini's last review of Claude:\n<<<\n${cb}\n>>>\n\nWrite the council's single final answer for Drew. Be fair: build it from the strongest parts of both answers, not from your own by default, and drop anything that was shown to be wrong.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- Then "## Where the council disagrees", only if a real disagreement remains. State each side in a sentence, and which one you would bet on and why. Leave this section out if they agree.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nDo not describe the debate or mention rounds. Keep links only to the best sources behind the key claims; drop weak ones.`,
 };
 
 function revisedPart(text) {
   const m = text.split(/^##\s*Revised answer\s*$/im);
   const body = m.length > 1 ? m.slice(1).join("") : text;
   return body.replace(/\n?STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE).*$/i, "").trim();
+}
+function verdictOf(text) {
+  const m = text.match(/VERDICT:\s*(NO MAJOR ISSUES|ISSUES FOUND)/i);
+  return m ? (/NO MAJOR/i.test(m[1]) ? "OK" : "ISSUES") : null;
+}
+const TAIL = /\n?(STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE)|VERDICT:\s*(NO MAJOR ISSUES|ISSUES FOUND)).*$/i;
+// Links the final answer actually uses come first and are marked cited.
+function citedFirst(text, consulted) {
+  const urls = [];
+  for (const m of (text || "").matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g)) urls.push({ url: m[2], title: m[1] });
+  const byUrl = new Map((consulted || []).map(s => [s.url, s]));
+  const cited = dedupe(urls).map(u => ({ ...(byUrl.get(u.url) || u), cited: true }));
+  const seen = new Set(cited.map(c => c.url));
+  return cited.concat((consulted || []).filter(s => !seen.has(s.url)));
 }
 function stanceOf(text) {
   const m = text.match(/STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE)/i);
@@ -687,7 +702,7 @@ async function runCouncil(convo, turnIndex) {
         onText: t => { turn.final.text = t; view.updateFinal(); },
       });
       turn.cost += r.cost; turn.costBy[solo] += r.cost;
-      turn.final = { text: r.text, by: solo, sources: dedupe(r.sources) };
+      turn.final = { text: r.text, by: solo, sources: citedFirst(r.text, dedupe(r.sources)) };
       turn.status = "done";
       view.updateFinal(true);
       view.status(`Answered by ${NAMES[solo]} alone`, true);
@@ -699,17 +714,22 @@ async function runCouncil(convo, turnIndex) {
     let lastCrit = { claude: "", gemini: "" };
     const rounds = turn.depth;
     for (let r = 1; r <= rounds; r++) {
-      view.status(`Round ${r} of ${rounds}: cross-examining`);
-      const crit = await pairStep(`Round ${r} · Critique`, "critique",
+      view.status(`Round ${r} of ${rounds}: reviewing each other's answers`);
+      const crit = await pairStep(`Round ${r} · Review`, "critique",
         who => P.critique(ctx, q, ans[who], ans[OTHER[who]], NAMES[OTHER[who]]), S.critique, files);
+      if (verdictOf(crit.claude) === "OK" && verdictOf(crit.gemini) === "OK") {
+        lastCrit = crit;
+        view.note(`Both models found no major issues in each other's answers${r > 1 ? ` in round ${r}` : ""}, so they went straight to the final answer.`);
+        break;
+      }
       view.status(`Round ${r} of ${rounds}: revising`);
-      const rev = await pairStep(`Round ${r} · Rebuttal and revision`, "revise",
+      const rev = await pairStep(`Round ${r} · Revision`, "revise",
         who => P.revise(ctx, q, ans[who], crit[OTHER[who]], ans[OTHER[who]], NAMES[OTHER[who]]), 0);
       lastCrit = crit;
       const stances = { claude: stanceOf(rev.claude), gemini: stanceOf(rev.gemini) };
       ans = { claude: revisedPart(rev.claude), gemini: revisedPart(rev.gemini) };
-      if (stances.claude === "AGREE" && stances.gemini === "AGREE" && r < rounds) {
-        view.note(`Both models agreed after round ${r}, so the remaining rounds were skipped.`);
+      if (stances.claude !== "DISAGREE" && stances.gemini !== "DISAGREE" && r < rounds) {
+        view.note(`The models agreed on the substance after round ${r}, so the remaining rounds were skipped.`);
         break;
       }
     }
@@ -725,7 +745,7 @@ async function runCouncil(convo, turnIndex) {
     turn.cost += fin.cost; turn.costBy[judge] += fin.cost;
     const all = [];
     for (const s of turn.steps) for (const w of ["claude", "gemini"]) for (const src of s[w].sources || []) all.push(src);
-    turn.final = { text: fin.text, by: judge, sources: dedupe(all) };
+    turn.final = { text: fin.text, by: judge, sources: citedFirst(fin.text, dedupe(all)) };
     turn.status = "done";
     view.updateFinal(true);
     view.status(`Debate finished: ${turn.steps.length} steps`, true);
@@ -777,12 +797,12 @@ function renderThread() {
 
 function renderEmpty() {
   const wrap = el("div", "empty");
-  wrap.appendChild(el("h1", null, "Two models argue it out. You get one answer."));
-  wrap.appendChild(el("p", null, "Claude and Gemini each answer your question, attack each other's reasoning, revise, and then merge the strongest version into one answer. Anything they still disagree on is spelled out."));
+  wrap.appendChild(el("h1", null, "Two models work it out. You get one answer."));
+  wrap.appendChild(el("p", null, "Claude and Gemini each answer your question, check each other's work, fix what matters, and merge the strongest version into one answer. Anything they still disagree on is spelled out."));
   const how = el("div", "howto");
   [["1 · Opening", "Both answer on their own, with web search."],
-   ["2 · Cross-examine", "Each finds the other's errors and gaps."],
-   ["3 · Revise", "Each concedes or defends, then improves."],
+   ["2 · Review", "Each checks the other's answer for problems that matter, and agrees with the rest."],
+   ["3 · Revise", "Each takes the good points and improves. Skipped if neither found real problems."],
    ["4 · Verdict", "One merged answer plus open disagreements."]]
     .forEach(([b, s]) => { const d = el("div"); d.appendChild(el("b", null, b)); d.appendChild(el("span", null, s)); how.appendChild(d); });
   wrap.appendChild(how);
@@ -846,9 +866,10 @@ function renderTurn(convo, index, live) {
       body.innerHTML = "";
       if (s.error) body.appendChild(el("div", "err", s.error));
       else if (!s.text) body.appendChild(el("span", null, "Thinking…")).style.color = "var(--muted)";
-      else body.appendChild(md(s.text.replace(/\n?STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE).*$/i, "")));
-      const st = s.text && stanceOf(s.text);
-      stance.hidden = !st; if (st) stance.textContent = st.toLowerCase();
+      else body.appendChild(md(s.text.replace(TAIL, "")));
+      const vd = s.text && verdictOf(s.text);
+      const st = vd ? (vd === "OK" ? "no major issues" : "issues found") : s.text && stanceOf(s.text)?.toLowerCase();
+      stance.hidden = !st; if (st) stance.textContent = st;
       cost.hidden = s.cost == null; if (s.cost != null) cost.textContent = money(s.cost);
       more.hidden = body.scrollHeight <= 250 && !v.classList.contains("expanded");
     };
@@ -895,9 +916,14 @@ function renderTurn(convo, index, live) {
       finalBox.appendChild(meta);
       if (t.final.sources?.length) {
         const d = el("details", "sources");
-        d.appendChild(el("summary", null, `${t.final.sources.length} sources consulted during the debate`));
+        const cited = t.final.sources.filter(s => s.cited);
+        const list = cited.length ? cited : t.final.sources;
+        const rest = t.final.sources.length - cited.length;
+        d.appendChild(el("summary", null, cited.length
+          ? `${cited.length} source${cited.length > 1 ? "s" : ""} cited` + (rest ? ` · ${rest} more looked at` : "")
+          : `${rest} source${rest > 1 ? "s" : ""} looked at`));
         const ol = el("ol");
-        t.final.sources.slice(0, 40).forEach(s => {
+        list.slice(0, 40).forEach(s => {
           const li = el("li"); const a = el("a", null, s.title || s.url);
           a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; li.appendChild(a); ol.appendChild(li);
         });
@@ -1081,7 +1107,8 @@ const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, 
 function downloadAnswer(t) {
   const esc = x => x.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const body = md(t.final.text).innerHTML;
-  const srcs = (t.final.sources || []).map(s => `<li><a href="${esc(s.url)}">${esc(s.title || s.url)}</a></li>`).join("");
+  const all = t.final.sources || [], cited = all.filter(s => s.cited);
+  const srcs = (cited.length ? cited : all).map(s => `<li><a href="${esc(s.url)}">${esc(s.title || s.url)}</a></li>`).join("");
   const html = `<html><head><meta charset="utf-8"><title>${esc(t.q.slice(0, 80))}</title></head><body style="font-family:Georgia,serif;line-height:1.5">` +
     `<p><b>Question:</b> ${esc(t.q)}</p><hr>${body}` + (srcs ? `<h3>Sources</h3><ol>${srcs}</ol>` : "") +
     `<p style="color:#777;font-size:11px">Council answer, ${new Date().toLocaleDateString()}</p></body></html>`;
