@@ -17,7 +17,10 @@ Switch the toggle from **Ask** to **Create** to make something instead of asking
 3. **Write:** each model writes only its own parts, at the same time, so the work is paid for once.
 4. **Check:** each checks the other's parts and fixes only real problems. Quick skips this; Deep adds more research per part.
 
-The finished piece shows as one document you can copy or download for Word.
+Pick **Make: Document or Slides** and **Then: Open in Google / Download Word/PowerPoint / Just show it**. With Open in Google, a tab opens when you click Create and turns into the finished Google Doc or Slides deck when it's done. No copying and pasting.
+
+## Finding your own files
+Optional, in Settings: let the council search your whole Google Drive (read-only) and/or one folder on your Mac. When your own notes, syllabus, prices or drafts would help, a cheap model searches by keyword, picks up to 3 files and attaches them; the answer shows which files it opened. Turn it off per question with the **My files** switch. It can read, never change or delete. Searching all of Drive needs wider Google permission than the Drive button, so Google shows an "unverified app" warning and may ask you to sign in again weekly.
 
 **Power:** Auto (default) has a tiny model read each question and pick Economy (Claude Sonnet 5.5 + Gemini 3.8 Flash) for everyday questions or Max (Claude Opus 5.5 + Gemini 4 Argon) for hard or high-stakes ones. You can also force Economy or Max.
 

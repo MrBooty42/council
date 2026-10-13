@@ -237,6 +237,13 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
             <option value="slides">Slides</option>
           </select>
         </label>
+        <label id="deliverWrap" hidden title="What happens when the council finishes making something">Then
+          <select id="deliverSel" aria-label="When it's done">
+            <option value="google">Open in Google</option>
+            <option value="file">Download Word/PowerPoint</option>
+            <option value="none">Just show it</option>
+          </select>
+        </label>
         <label>Mode
           <select id="modeSel" aria-label="Mode">
             <option value="general">General</option>
@@ -367,7 +374,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", power: "auto", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council", task: "ask", format: "doc", googleClientId: "", googleApiKey: "", driveAuto: false, myFiles: true };
+const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", power: "auto", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council", task: "ask", format: "doc", googleClientId: "", googleApiKey: "", driveAuto: false, myFiles: true, deliver: "google" };
 let settings = Object.assign({}, DEFAULT_SETTINGS, store.get("council.settings", {}));
 let convos = store.get("council.convos", []);
 let activeId = store.get("council.active", null);
@@ -763,6 +770,7 @@ function renderFolder() {
   $("#folderName").textContent = !supported ? "Choosing a folder works in Chrome on a computer." : folderHandle ? `Folder: ${folderHandle.name}` : "";
   $("#folderForget").hidden = !folderHandle;
 }
+function initFolder() {
 $("#folderBtn").onclick = async () => {
   try {
     folderHandle = await window.showDirectoryPicker({ id: "council", mode: "read" });
@@ -773,6 +781,7 @@ $("#folderBtn").onclick = async () => {
 };
 $("#folderForget").onclick = async () => { folderHandle = null; folderIndex = null; await idb.set("folder", undefined).catch(() => {}); renderFolder(); syncOpts(); };
 idb.get("folder").then(h => { if (h) { folderHandle = h; syncOpts(); } }).catch(() => {});
+}
 
 // Runs inside the Ask click, so Chrome and Google allow their permission prompts.
 async function fileSources() {
@@ -1061,7 +1070,14 @@ async function runCouncil(convo, turnIndex) {
     view.status(turn.status === "stopped" ? "Stopped" : "Something went wrong", true);
     view.error(turn.error);
   } finally {
-    delete turn._files; delete turn._sources;
+    if (turn.status === "done" && turn.task === "create" && turn.deliver && turn.deliver !== "none") {
+      view.status(turn.deliver === "google" ? "Creating your Google file" : "Saving your file");
+      const msg = await deliver(turn, turn._tab);
+      if (msg) view.note(msg);
+      view.updateFinal(true);
+      view.status(msg.startsWith("Couldn't") ? "Made it, but saving failed" : "Done", true);
+    } else if (turn._tab && !turn._tab.closed) turn._tab.close();
+    delete turn._files; delete turn._sources; delete turn._tab;
     addSpend(turn.cost);
     saveConvos();
   }
@@ -1246,7 +1262,10 @@ function renderTurn(convo, index, live) {
       const outs = t.format === "slides"
         ? [["Download PowerPoint", b => downloadPptx(t, b)], ["Save to Google Slides", b => saveToGoogle(t, "slides", b)]]
         : [["Download for Word", () => downloadAnswer(t)], ["Save to Google Docs", b => saveToGoogle(t, "docs", b)]];
-      for (const [name, fn] of outs) { const b = el("button", null, name); b.onclick = () => fn(b); meta.appendChild(b); }
+      for (const [name, fn] of outs) {
+        if (t.saved && name.startsWith("Save to Google")) { meta.appendChild(savedLink(t)); continue; }
+        const b = el("button", null, name); b.onclick = () => fn(b); meta.appendChild(b);
+      }
       finalBox.appendChild(meta);
       if (t.final.sources?.length) {
         const d = el("details", "sources");
@@ -1276,7 +1295,7 @@ function renderTurn(convo, index, live) {
     addStep(step) { addStep(step); scrollToEnd(); },
     updateVoice(step, who) { voiceEls.get(step)?.[who]?.draw(); },
     status(text, finished) { status.textContent = text; if (finished) { pulse.hidden = true; } },
-    note(text) { t.note = text; steps.appendChild(el("div", "note", text)); },
+    note(text) { t.note = t.note ? t.note + " " + text : text; steps.appendChild(el("div", "note", text)); },
     found() { foundLine.hidden = !t.found?.length; foundLine.textContent = "🔎 Opened from your files: " + (t.found || []).join(", "); },
     tier() { if (t.claudeTier) status.textContent = `${t.claudeTier === "max" ? "Max" : "Economy"} power${t.power === "auto" ? " (picked automatically)" : ""}`; },
     showFinal() { finalBox.hidden = false; det.open = false; drawFinal(); scrollToEnd(); },
@@ -1408,8 +1427,13 @@ async function ask() {
     convos.unshift(c); activeId = c.id;
   }
   const files = pending; pending = []; renderChips();
+  const making = settings.task === "create";
+  let deliverTo = making ? settings.deliver || "google" : "none";
+  if (deliverTo === "google" && !googleReady()) deliverTo = "file";
+  const tab = deliverTo === "google" ? openWaitingTab() : null;
+  if (deliverTo === "google") { try { await googleToken(); } catch (e) { if (tab) tab.close(); deliverTo = "file"; showWarn(e.message + " It'll download as a file instead."); } }
   const sources = await fileSources();
-  c.turns.push({ q, _sources: sources, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who, power: settings.power, task: settings.task, format: settings.task === "create" ? settings.format : "doc",
+  c.turns.push({ q, _sources: sources, _tab: tab, deliver: deliverTo, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who, power: settings.power, task: settings.task, format: settings.task === "create" ? settings.format : "doc",
     files: files.map(f => f.name), _files: files, status: "running" });
   input.value = ""; autosize();
   saveConvos(); renderList();
@@ -1432,6 +1456,7 @@ $("#taskSeg").addEventListener("click", e => {
   if (!activeConvo()?.turns.length) renderThread();
 });
 $("#formatSel").addEventListener("change", e => { settings.format = e.target.value; saveSettings(); });
+$("#deliverSel").addEventListener("change", e => { settings.deliver = e.target.value; saveSettings(); });
 $("#modeSel").addEventListener("change", e => { settings.mode = e.target.value; saveSettings(); });
 $("#powerSel").addEventListener("change", e => { settings.power = e.target.value; saveSettings(); });
 $("#searchToggle").addEventListener("change", e => { settings.search = e.target.checked; saveSettings(); });
@@ -1446,6 +1471,7 @@ function syncOpts() {
   $("#myFilesWrap").hidden = !fileSourcesOn(); $("#myFilesToggle").checked = settings.myFiles !== false;
   const create = settings.task === "create";
   $("#formatWrap").hidden = !create; $("#formatSel").value = settings.format || "doc";
+  $("#deliverWrap").hidden = !create; $("#deliverSel").value = settings.deliver || "google";
   document.querySelectorAll("#taskSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.task === settings.task)));
   const tips = create ? ["Write it, no cross-check (cheapest)", "Write it, then check each other's parts", "More research per part, then check"]
     : ["1 round of review", "Up to 2 rounds of review", "Up to 3 rounds of review"];
@@ -1661,18 +1687,57 @@ async function driveUpload(meta, blob) {
   if (!res.ok) throw await driveError(res);
   return res.json();
 }
+async function googleSave(t, kind) {
+  const slides = kind === "slides";
+  const blob = slides ? await makePptx(t) : new Blob([answerHtml(t)], { type: "text/html" });
+  const f = await driveUpload({ name: titleOf(t), mimeType: slides ? "application/vnd.google-apps.presentation" : "application/vnd.google-apps.document" }, blob);
+  t.saved = { url: f.webViewLink || (slides ? `https://docs.google.com/presentation/d/${f.id}/edit` : `https://docs.google.com/document/d/${f.id}/edit`), kind };
+  saveConvos();
+  return t.saved.url;
+}
 function saveToGoogle(t, kind, btn) {
   if (!googleReady()) { showWarn("Connect Google first: add your Google client ID and API key in Settings."); openSettings("google"); return; }
   return busy(btn, "Saving…", async () => {
     await googleToken(); // sign in first, while the click still counts as a click
-    const slides = kind === "slides";
-    const blob = slides ? await makePptx(t) : new Blob([answerHtml(t)], { type: "text/html" });
-    const f = await driveUpload({ name: titleOf(t), mimeType: slides ? "application/vnd.google-apps.presentation" : "application/vnd.google-apps.document" }, blob);
-    const url = f.webViewLink || (slides ? `https://docs.google.com/presentation/d/${f.id}/edit` : `https://docs.google.com/document/d/${f.id}/edit`);
-    const a = el("a", "btnlink", slides ? "Open in Google Slides ↗" : "Open in Google Docs ↗");
-    a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
-    btn.after(a); btn.hidden = true;
+    await googleSave(t, kind);
+    btn.after(savedLink(t)); btn.hidden = true;
   });
+}
+function savedLink(t) {
+  const a = el("a", "btnlink", t.saved.kind === "slides" ? "Open in Google Slides ↗" : "Open in Google Docs ↗");
+  a.href = t.saved.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+  return a;
+}
+// Create mode, finished: put the result where Drew asked, without another click.
+// The Google tab was opened during the Ask click (browsers block tabs opened later) and is pointed at the file now.
+async function deliver(t, tab) {
+  const slides = t.format === "slides";
+  try {
+    if (t.deliver === "file") {
+      if (slides) saveBlob(slug(titleOf(t)) + ".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", await makePptx(t));
+      else downloadAnswer(t);
+      return `Downloaded to your Downloads folder as ${slides ? "PowerPoint" : "Word"}.`;
+    }
+    if (t.deliver === "google") {
+      const url = await googleSave(t, slides ? "slides" : "docs");
+      if (tab && !tab.closed) { tab.location.href = url; return `Opened in Google ${slides ? "Slides" : "Docs"}.`; }
+      return `Saved to Google ${slides ? "Slides" : "Docs"}.`;
+    }
+  } catch (e) {
+    if (tab && !tab.closed) tab.close();
+    return `Couldn't ${t.deliver === "google" ? "save it to Google" : "download it"}: ${e.message}`;
+  }
+  return "";
+}
+function openWaitingTab() {
+  const w = window.open("", "_blank");
+  if (!w) return null;
+  try {
+    w.document.title = "Council is working…";
+    w.document.body.style.cssText = "font:16px/1.5 system-ui,sans-serif;padding:40px;color:#444";
+    w.document.body.textContent = "Council is building it. This tab turns into your Google file when it's done, so you can leave it open.";
+  } catch {}
+  return w;
 }
 
 /* ---------- History drawer ---------- */
@@ -1751,6 +1816,7 @@ $("#importInput").addEventListener("change", async e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") { closeSettings(); openDrawer(false); } });
 
+initFolder();
 syncOpts();
 renderSpend();
 if (googleReady()) (window.requestIdleCallback || setTimeout)(preloadGoogle);
