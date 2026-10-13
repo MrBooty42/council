@@ -131,7 +131,8 @@ main { overflow-y: auto; }
 .md code { font-family: var(--font-mono); font-size: .88em; }
 .md blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
 .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font: 12px/1.4 var(--font-ui); color: var(--muted); }
-.meta button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+.meta button, .meta a.btnlink { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 8px; font-size: 12px; color: var(--fg); text-decoration: none; }
+.attach.drive { font-size: 13px; padding: 10px; }
 .sources { font: 13px/1.5 var(--font-ui); margin-top: 10px; }
 .sources summary { cursor: pointer; color: var(--muted); }
 .sources ol { margin: 6px 0 0; padding-left: 20px; }
@@ -217,6 +218,7 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
       <div class="chips" id="chips" hidden></div>
       <div class="inputrow">
         <button class="attach" id="attachBtn" title="Attach PDFs, Word or PowerPoint files, photos or text files" aria-label="Attach files">📎</button>
+        <button class="attach drive" id="driveBtn" title="Attach Google Docs, Slides, Sheets or any file from Google Drive" aria-label="Attach from Google Drive">Drive</button>
         <input type="file" id="fileInput" multiple hidden accept=".pdf,.docx,.pptx,.txt,.md,.csv,.json,image/*">
         <textarea id="input" rows="1" placeholder="Ask the council anything…" aria-label="Your question"></textarea>
         <button class="send" id="sendBtn">Ask</button>
@@ -227,6 +229,12 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
           <button data-task="ask" aria-pressed="true" title="Ask a question; the models check each other and agree on the best answer">Ask</button>
           <button data-task="create" aria-pressed="false" title="Make something (study guide, report, business plan); the models split the work part by part">Create</button>
         </span>
+        <label id="formatWrap" hidden>Make
+          <select id="formatSel" aria-label="Output format">
+            <option value="doc">Document</option>
+            <option value="slides">Slides</option>
+          </select>
+        </label>
         <label>Mode
           <select id="modeSel" aria-label="Mode">
             <option value="general">General</option>
@@ -310,6 +318,17 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
       <span class="hint">That model merges both sides fairly and lists anything still unresolved.</span>
     </div>
     </div>
+    <div class="row2" id="googleFields">
+      <div class="field">
+        <label for="googleClientId">Google client ID (optional)</label>
+        <input id="googleClientId" autocomplete="off" placeholder="…apps.googleusercontent.com">
+      </div>
+      <div class="field">
+        <label for="googleApiKey">Google API key for the file picker</label>
+        <input id="googleApiKey" type="password" autocomplete="off" placeholder="AIza…">
+      </div>
+    </div>
+    <span class="hint" id="googleHint" style="margin-top:-8px">Lets you attach files from Google Drive and save results to Google Docs or Slides. The app can only see files you pick or files it creates. One-time setup: <a href="https://github.com/MrBooty42/council#google-drive-setup" target="_blank" rel="noopener">follow these steps</a>.</span>
     <div class="field">
       <label>History backup</label>
       <div class="backup">
@@ -335,7 +354,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", power: "auto", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council", task: "ask" };
+const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", power: "auto", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council", task: "ask", format: "doc", googleClientId: "", googleApiKey: "" };
 let settings = Object.assign({}, DEFAULT_SETTINGS, store.get("council.settings", {}));
 let convos = store.get("council.convos", []);
 let activeId = store.get("council.active", null);
@@ -604,6 +623,7 @@ const P = {
   final: (ctx, q, a, b, ca, cb) => `${ctx}Drew's question:\n${q}\n\nThe debate is over. Here is where it ended.\n\nClaude's final answer:\n<<<\n${a}\n>>>\n\nGemini's final answer:\n<<<\n${b}\n>>>\n\nClaude's last review of Gemini:\n<<<\n${ca}\n>>>\n\nGemini's last review of Claude:\n<<<\n${cb}\n>>>\n\nWrite the council's single final answer for Drew. Be fair: build it from the strongest parts of both answers, not from your own by default, and drop anything that was shown to be wrong.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- Then "## Where the council disagrees", only if a real disagreement remains. State each side in a sentence, and which one you would bet on and why. Leave this section out if they agree.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nDo not describe the debate or mention rounds. Keep links only to the best sources behind the key claims; drop weak ones.`,
 };
 
+const SLIDES_RULE = `\n\nThe output is a slide deck, not a document. Each part is a section of 1 to 5 slides. When you write slides, write each one as a line "### Slide title", then 3 to 6 short bullets (under 15 words each), then optionally one line starting "Notes:" with what Drew should say out loud. No paragraphs on slides.`;
 function planText(plan) {
   return `Title: ${plan.title}\nStyle: ${plan.style}\n` + plan.parts.map(p => `${p.n}. ${p.title} (written by ${NAMES[p.writer]}): ${p.brief}`).join("\n");
 }
@@ -736,11 +756,12 @@ async function runCouncil(convo, turnIndex) {
   // assigns a writer, each model writes only its own parts, then they check each other's.
   async function buildTogether(files) {
     const deep = turn.depth === 3;
+    const F = turn.format === "slides" ? SLIDES_RULE : "";
     view.status("Both models are pitching how to build it");
-    const pitch = await pairStep("Ideas", "pitch", () => P.pitch(ctx, q), 0, files);
+    const pitch = await pairStep("Ideas", "pitch", () => P.pitch(ctx, q) + F, 0, files);
     const planner = turn.judge;
     view.status(`${NAMES[planner]} is picking the best idea for each part`);
-    const planOut = await pairStep("Plan", "plan", () => P.plan(ctx, q, pitch.claude, pitch.gemini), 0, [], [planner]);
+    const planOut = await pairStep("Plan", "plan", () => P.plan(ctx, q, pitch.claude, pitch.gemini) + F, 0, [], [planner]);
     let plan = parsePlan(planOut[planner], planner, q);
     const planStep = turn.steps.at(-1);
     if (!plan) {
@@ -752,7 +773,7 @@ async function runCouncil(convo, turnIndex) {
     const partsOf = w => plan.parts.filter(p => p.writer === w).map(p => p.n);
     const writers = ["claude", "gemini"].filter(w => partsOf(w).length);
     view.status(writers.length > 1 ? "Both models are writing their parts" : `${NAMES[writers[0]]} is writing`);
-    const built = await pairStep("Writing", "build", w => P.build(ctx, q, plan, partsOf(w), NAMES[OTHER[w]]), turn.search ? (deep ? 5 : 3) : 0, files, writers);
+    const built = await pairStep("Writing", "build", w => P.build(ctx, q, plan, partsOf(w), NAMES[OTHER[w]]) + F, turn.search ? (deep ? 5 : 3) : 0, files, writers);
     const content = {};
     for (const w of writers) Object.assign(content, splitParts(built[w], partsOf(w)));
     const textOf = w => partsOf(w).filter(n => content[n]).map(n => `@@PART ${n}@@\n${content[n]}`).join("\n\n");
@@ -765,7 +786,7 @@ async function runCouncil(convo, turnIndex) {
       if (!toFix.length) view.note("Each model checked the other's parts and found no major issues.");
       else {
         view.status("Fixing what the check found");
-        const fixed = await pairStep("Fixes", "revise", w => P.fix(ctx, q, plan, textOf(w), check[OTHER[w]], NAMES[OTHER[w]]), 0, [], toFix);
+        const fixed = await pairStep("Fixes", "revise", w => P.fix(ctx, q, plan, textOf(w), check[OTHER[w]], NAMES[OTHER[w]]) + F, 0, [], toFix);
         for (const w of toFix) {
           const own = new Set(partsOf(w));
           for (const [n, text] of Object.entries(splitParts(fixed[w], []))) if (own.has(+n)) content[n] = text;
@@ -796,7 +817,7 @@ async function runCouncil(convo, turnIndex) {
       turn.final = { text: "", by: solo };
       view.showFinal();
       const r = await call(solo, {
-        system: systemFor(solo, turn), prompt: turn.task === "create" ? P.makeSolo(ctx, q) : P.solo(ctx, q), search: S.solo, signal, files, tier: TIERS[turn.claudeTier], gmodel: turn.geminiModel,
+        system: systemFor(solo, turn), prompt: turn.task === "create" ? P.makeSolo(ctx, q) + (turn.format === "slides" ? SLIDES_RULE + ` Start with a line "# Deck title".` : "") : P.solo(ctx, q), search: S.solo, signal, files, tier: TIERS[turn.claudeTier], gmodel: turn.geminiModel,
         onText: t => { turn.final.text = t; view.updateFinal(); },
       });
       turn.cost += r.cost; turn.costBy[solo] += r.cost;
@@ -1033,9 +1054,10 @@ function renderTurn(convo, index, live) {
         setTimeout(() => copy.textContent = "Copy answer", 1500);
       };
       meta.appendChild(copy);
-      const save = el("button", null, "Download for Word");
-      save.onclick = () => downloadAnswer(t);
-      meta.appendChild(save);
+      const outs = t.format === "slides"
+        ? [["Download PowerPoint", b => downloadPptx(t, b)], ["Save to Google Slides", b => saveToGoogle(t, "slides", b)]]
+        : [["Download for Word", () => downloadAnswer(t)], ["Save to Google Docs", b => saveToGoogle(t, "docs", b)]];
+      for (const [name, fn] of outs) { const b = el("button", null, name); b.onclick = () => fn(b); meta.appendChild(b); }
       finalBox.appendChild(meta);
       if (t.final.sources?.length) {
         const d = el("details", "sources");
@@ -1095,6 +1117,7 @@ let pending = []; // { name, kind: pdf|image|text, mime, data | text, size }
 const MAX_TOTAL = 15 * 1024 * 1024;
 const fileInput = $("#fileInput");
 $("#attachBtn").onclick = () => fileInput.click();
+$("#driveBtn").onclick = pickFromDrive;
 fileInput.addEventListener("change", async () => { await addFiles([...fileInput.files]); fileInput.value = ""; });
 input.addEventListener("paste", e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } });
 const composer = document.querySelector(".composer");
@@ -1190,7 +1213,7 @@ async function ask() {
     convos.unshift(c); activeId = c.id;
   }
   const files = pending; pending = []; renderChips();
-  c.turns.push({ q, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who, power: settings.power, task: settings.task,
+  c.turns.push({ q, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who, power: settings.power, task: settings.task, format: settings.task === "create" ? settings.format : "doc",
     files: files.map(f => f.name), _files: files, status: "running" });
   input.value = ""; autosize();
   saveConvos(); renderList();
@@ -1212,6 +1235,7 @@ $("#taskSeg").addEventListener("click", e => {
   settings.task = b.dataset.task; saveSettings(); syncOpts();
   if (!activeConvo()?.turns.length) renderThread();
 });
+$("#formatSel").addEventListener("change", e => { settings.format = e.target.value; saveSettings(); });
 $("#modeSel").addEventListener("change", e => { settings.mode = e.target.value; saveSettings(); });
 $("#powerSel").addEventListener("change", e => { settings.power = e.target.value; saveSettings(); });
 $("#searchToggle").addEventListener("change", e => { settings.search = e.target.checked; saveSettings(); });
@@ -1223,6 +1247,7 @@ function syncOpts() {
   $("#powerSel").value = settings.power;
   $("#searchToggle").checked = settings.search;
   const create = settings.task === "create";
+  $("#formatWrap").hidden = !create; $("#formatSel").value = settings.format || "doc";
   document.querySelectorAll("#taskSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.task === settings.task)));
   const tips = create ? ["Write it, no cross-check (cheapest)", "Write it, then check each other's parts", "More research per part, then check"]
     : ["1 round of review", "Up to 2 rounds of review", "Up to 3 rounds of review"];
@@ -1239,15 +1264,215 @@ function saveBlob(name, type, content) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "answer";
-function downloadAnswer(t) {
+const titleOf = t => (t.final.text.match(/^#\s+(.+)$/m)?.[1] || t.q).replace(/[*_`#]/g, "").trim().slice(0, 100);
+function answerHtml(t) {
   const esc = x => x.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const body = md(t.final.text).innerHTML;
   const all = t.final.sources || [], cited = all.filter(s => s.cited);
   const srcs = (cited.length ? cited : all).map(s => `<li><a href="${esc(s.url)}">${esc(s.title || s.url)}</a></li>`).join("");
-  const html = `<html><head><meta charset="utf-8"><title>${esc(t.q.slice(0, 80))}</title></head><body style="font-family:Georgia,serif;line-height:1.5">` +
-    `<p><b>Question:</b> ${esc(t.q)}</p><hr>${body}` + (srcs ? `<h3>Sources</h3><ol>${srcs}</ol>` : "") +
-    `<p style="color:#777;font-size:11px">Council answer, ${new Date().toLocaleDateString()}</p></body></html>`;
-  saveBlob(slug(t.q) + ".doc", "application/msword", html);
+  return `<html><head><meta charset="utf-8"><title>${esc(titleOf(t))}</title></head><body style="font-family:Georgia,serif;line-height:1.5">` +
+    (t.task === "create" ? body : `<p><b>Question:</b> ${esc(t.q)}</p><hr>${body}`) + (srcs ? `<h3>Sources</h3><ol>${srcs}</ol>` : "") +
+    `<p style="color:#777;font-size:11px">Made by Council, ${new Date().toLocaleDateString()}</p></body></html>`;
+}
+function downloadAnswer(t) { saveBlob(slug(titleOf(t)) + ".doc", "application/msword", answerHtml(t)); }
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const old = document.querySelector(`script[src="${src}"]`);
+    if (old?.dataset.loaded) return res();
+    const s = old || document.createElement("script");
+    s.addEventListener("load", () => { s.dataset.loaded = "1"; res(); });
+    s.addEventListener("error", () => { s.remove(); rej(new Error("Couldn't load a Google or PowerPoint helper. Check your internet connection, or turn off an ad blocker for this site.")); });
+    if (!old) { s.src = src; s.async = true; document.head.appendChild(s); }
+  });
+}
+
+/* ---------- PowerPoint ---------- */
+// Turns markdown into slides: "#" is the deck title, "##" a section divider, "###" a slide
+// (or "##" is the slide when there are no "###" headings). Bullets and notes go on the slide.
+const plain = x => x.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/<[^>]+>/g, "").replace(/(\*\*|__|\*|_|`)/g, "").trim();
+function toSlides(text) {
+  const lines = (text || "").split("\n");
+  const level = lines.some(l => /^###\s/.test(l)) ? 3 : 2;
+  let title = "", section = "", cur = null;
+  const slides = [];
+  for (const raw of lines) {
+    const l = raw.replace(/\s+$/, "");
+    const h = l.match(/^(#{1,6})\s+(.*)/);
+    if (h) {
+      const n = h[1].length, txt = plain(h[2]);
+      if (n === 1 && !title && !slides.length) title = txt;
+      else if (n === level) { cur = { title: txt, bullets: [], notes: "" }; slides.push(cur); }
+      else if (n < level) { cur = null; section = txt; slides.push({ section: txt }); }
+      else if (cur) cur.bullets.push({ text: txt, level: 0 });
+      continue;
+    }
+    if (!l.trim() || /^\|?[\s:|-]*-{3,}[\s:|-]*$/.test(l.trim())) continue;
+    const note = l.match(/^\s*(?:\*\*|_)?(?:speaker\s+)?notes?:?(?:\*\*|_)?:?\s+(.*)/i);
+    if (note && cur && /notes?/i.test(l.slice(0, 20))) { cur.notes += (cur.notes ? " " : "") + plain(note[1]); continue; }
+    if (!cur) { cur = { title: section || title || "Overview", bullets: [], notes: "" }; slides.push(cur); }
+    const b = l.match(/^(\s*)(?:[-*+]|\d+[.)])\s+(.*)/);
+    if (b) cur.bullets.push({ text: plain(b[2]), level: Math.min(2, Math.floor(b[1].length / 2)) });
+    else if (/^\s*\|/.test(l)) cur.bullets.push({ text: l.split("|").map(plain).filter(Boolean).join("  ·  "), level: 0 });
+    else cur.bullets.push({ text: plain(l), level: 0, para: true });
+  }
+  // Long slides continue on a second slide instead of overflowing.
+  const out = [];
+  for (const sl of slides) {
+    if (sl.section || sl.bullets.length <= 7) { out.push(sl); continue; }
+    for (let i = 0; i < sl.bullets.length; i += 7)
+      out.push({ title: sl.title + (i ? " (cont.)" : ""), bullets: sl.bullets.slice(i, i + 7), notes: i ? "" : sl.notes });
+  }
+  return { title, slides: out };
+}
+async function makePptx(t) {
+  await loadScript("https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js");
+  const { title, slides } = toSlides(t.final.text);
+  const pptx = new PptxGenJS();
+  pptx.layout = "LAYOUT_WIDE";
+  pptx.title = title || titleOf(t);
+  const INK = "1D1F22", MUTED = "62666D", ACC = "A35A1F", FONT = "Calibri";
+  const first = pptx.addSlide();
+  first.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.25, h: 7.5, fill: { color: ACC } });
+  first.addText(title || titleOf(t), { x: 0.9, y: 1.9, w: 11.5, h: 2.2, fontSize: 48, bold: true, color: INK, fontFace: FONT, valign: "bottom" });
+  first.addText(new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }), { x: 0.9, y: 4.25, w: 11.5, h: 0.6, fontSize: 20, color: MUTED, fontFace: FONT });
+  for (const sl of slides) {
+    const s = pptx.addSlide();
+    if (sl.section) {
+      s.background = { color: INK };
+      s.addText(sl.section, { x: 0.9, y: 2.6, w: 11.5, h: 1.8, fontSize: 44, bold: true, color: "FFFFFF", fontFace: FONT });
+      continue;
+    }
+    s.addText(sl.title, { x: 0.9, y: 0.35, w: 11.5, h: 0.95, fontSize: 36, bold: true, color: INK, fontFace: FONT, valign: "bottom" });
+    s.addShape(pptx.ShapeType.rect, { x: 0.9, y: 1.38, w: 1.2, h: 0.06, fill: { color: ACC } });
+    const n = sl.bullets.length;
+    if (n) s.addText(sl.bullets.map(b => ({ text: b.text, options: { bullet: b.para ? false : true, indentLevel: b.level, breakLine: true, paraSpaceAfter: 8 } })),
+      { x: 0.9, y: 1.7, w: 11.5, h: 5.3, fontSize: n <= 4 ? 28 : n <= 6 ? 24 : 20, color: INK, fontFace: FONT, valign: "top" });
+    if (sl.notes) s.addNotes(sl.notes);
+  }
+  return pptx.write({ outputType: "blob" });
+}
+async function busy(btn, text, fn) {
+  const label = btn.textContent; btn.disabled = true; btn.textContent = text;
+  try { return await fn(); }
+  catch (e) { showWarn(e.message || String(e)); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+function downloadPptx(t, btn) {
+  return busy(btn, "Making slides…", async () => saveBlob(slug(titleOf(t)) + ".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", await makePptx(t)));
+}
+
+/* ---------- Google Drive, Docs and Slides ---------- */
+// Browser sign-in with the drive.file scope: the app sees only files Drew picks or files it creates.
+let gToken = null, gTokenExp = 0;
+const googleReady = () => !!(settings.googleClientId && settings.googleApiKey);
+function preloadGoogle() {
+  loadScript("https://accounts.google.com/gsi/client").catch(() => {});
+  loadScript("https://apis.google.com/js/api.js").then(() => gapi.load("picker", () => {})).catch(() => {});
+}
+async function googleToken() {
+  if (gToken && Date.now() < gTokenExp - 60000) return gToken;
+  await loadScript("https://accounts.google.com/gsi/client");
+  return new Promise((res, rej) => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: settings.googleClientId,
+      scope: "https://www.googleapis.com/auth/drive.file",
+      callback: r => {
+        if (r.error) return rej(new Error(`Google sign-in failed (${r.error}). Check the client ID in Settings.`));
+        gToken = r.access_token; gTokenExp = Date.now() + (+r.expires_in || 3600) * 1000; res(gToken);
+      },
+      error_callback: e => rej(new Error(e?.type === "popup_closed" ? "Google sign-in was closed before it finished."
+        : e?.type === "popup_failed_to_open" ? "Chrome blocked the Google sign-in window. Allow pop-ups for this site and try again."
+        : "Google sign-in didn't work. Check the client ID in Settings and that this site is listed under Authorized JavaScript origins.")),
+    });
+    client.requestAccessToken({ prompt: "" });
+  });
+}
+async function driveError(res) {
+  let msg = "";
+  try { msg = (await res.json()).error?.message || ""; } catch {}
+  if (res.status === 401) { gToken = null; return new Error("Your Google sign-in expired. Try again."); }
+  if (/has not been used|is disabled/i.test(msg)) return new Error("Turn on the Google Drive API in your Google Cloud project (setup step 2), wait a minute, then try again.");
+  if (res.status === 403 || res.status === 404) return new Error("Google wouldn't let the app open that file. Pick it again with the Drive button so the app gets access.");
+  return new Error(`Google Drive error ${res.status}${msg ? ": " + msg : ""}`);
+}
+const GOOGLE_EXPORTS = {
+  "application/vnd.google-apps.document": [["text/markdown", ".md"], ["text/plain", ".txt"]],
+  "application/vnd.google-apps.presentation": [["application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx"]],
+  "application/vnd.google-apps.spreadsheet": [["text/csv", ".csv"]],
+};
+async function driveFile(doc, token) {
+  const H = { Authorization: "Bearer " + token };
+  const base = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(doc.id)}`;
+  const exp = GOOGLE_EXPORTS[doc.mimeType];
+  if (/^application\/vnd\.google-apps\./.test(doc.mimeType) && !exp) throw new Error(`"${doc.name}" is a Google file type the models can't read. Docs, Slides and Sheets work.`);
+  let res;
+  if (exp) {
+    for (const [type, ext] of exp) {
+      res = await fetch(`${base}/export?mimeType=${encodeURIComponent(type)}`, { headers: H });
+      if (res.ok) return new File([await res.blob()], doc.name + ext, { type });
+    }
+  } else {
+    res = await fetch(`${base}?alt=media`, { headers: H });
+    if (res.ok) return new File([await res.blob()], doc.name, { type: doc.mimeType || "" });
+  }
+  throw await driveError(res);
+}
+async function pickFromDrive() {
+  if (!googleReady()) { showWarn("Connect Google first: add your Google client ID and API key in Settings."); openSettings("google"); return; }
+  try {
+    const token = await googleToken();
+    await loadScript("https://apis.google.com/js/api.js");
+    await new Promise(r => gapi.load("picker", r));
+    const docs = await new Promise(res => {
+      const view = new google.picker.DocsView(google.picker.ViewId.DOCS).setIncludeFolders(true).setMode(google.picker.DocsViewMode.LIST);
+      new google.picker.PickerBuilder()
+        .addView(view)
+        .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+        .setOAuthToken(token)
+        .setDeveloperKey(settings.googleApiKey)
+        .setAppId(settings.googleClientId.split("-")[0])
+        .setOrigin(location.origin)
+        .setTitle("Attach from Google Drive")
+        .setCallback(d => {
+          if (d.action === google.picker.Action.PICKED) res(d.docs || []);
+          else if (d.action === google.picker.Action.CANCEL) res([]);
+        })
+        .build().setVisible(true);
+    });
+    if (!docs.length) return;
+    showWarn(`Getting ${docs.length} file${docs.length > 1 ? "s" : ""} from Drive…`);
+    const files = [];
+    for (const d of docs) {
+      try { files.push(await driveFile(d, token)); }
+      catch (e) { showWarn(e.message); }
+    }
+    if (files.length) { if ($("#warn").textContent.startsWith("Getting")) showWarn(""); await addFiles(files); }
+  } catch (e) { showWarn(e.message || String(e)); }
+}
+async function driveUpload(meta, blob) {
+  const token = await googleToken();
+  const form = new FormData();
+  form.append("metadata", new Blob([JSON.stringify(meta)], { type: "application/json" }));
+  form.append("file", blob);
+  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink", {
+    method: "POST", headers: { Authorization: "Bearer " + token }, body: form,
+  });
+  if (!res.ok) throw await driveError(res);
+  return res.json();
+}
+function saveToGoogle(t, kind, btn) {
+  if (!googleReady()) { showWarn("Connect Google first: add your Google client ID and API key in Settings."); openSettings("google"); return; }
+  return busy(btn, "Saving…", async () => {
+    await googleToken(); // sign in first, while the click still counts as a click
+    const slides = kind === "slides";
+    const blob = slides ? await makePptx(t) : new Blob([answerHtml(t)], { type: "text/html" });
+    const f = await driveUpload({ name: titleOf(t), mimeType: slides ? "application/vnd.google-apps.presentation" : "application/vnd.google-apps.document" }, blob);
+    const url = f.webViewLink || (slides ? `https://docs.google.com/presentation/d/${f.id}/edit` : `https://docs.google.com/document/d/${f.id}/edit`);
+    const a = el("a", "btnlink", slides ? "Open in Google Slides ↗" : "Open in Google Docs ↗");
+    a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    btn.after(a); btn.hidden = true;
+  });
 }
 
 /* ---------- History drawer ---------- */
@@ -1275,19 +1500,25 @@ function renderList() {
 }
 
 /* ---------- Settings ---------- */
-function openSettings() {
+function openSettings(section) {
   $("#claudeKey").value = settings.claudeKey; $("#geminiKey").value = settings.geminiKey;
   $("#geminiModel").value = settings.geminiModel; $("#judge").value = settings.judge;
   $("#about").value = settings.about; $("#budget").value = settings.budget;
-  $("#settings").hidden = false; $("#scrim").hidden = false; $("#claudeKey").focus();
+  $("#googleClientId").value = settings.googleClientId || ""; $("#googleApiKey").value = settings.googleApiKey || "";
+  $("#settings").hidden = false; $("#scrim").hidden = false;
+  if (section === "google") { $("#googleFields").scrollIntoView({ block: "center" }); $("#googleClientId").focus(); } else $("#claudeKey").focus();
 }
 function closeSettings() { $("#settings").hidden = true; if ($("#drawer").hidden) $("#scrim").hidden = true; }
-$("#settingsBtn").onclick = openSettings;
+$("#settingsBtn").onclick = () => openSettings();
 $("#settingsCancel").onclick = closeSettings;
 $("#settingsSave").onclick = () => {
   settings.claudeKey = $("#claudeKey").value.trim(); settings.geminiKey = $("#geminiKey").value.trim();
   settings.geminiModel = $("#geminiModel").value; settings.judge = $("#judge").value;
   settings.about = $("#about").value.trim(); settings.budget = Math.max(0, +$("#budget").value || 0);
+  const gid = $("#googleClientId").value.trim();
+  if (gid !== settings.googleClientId) gToken = null;
+  settings.googleClientId = gid; settings.googleApiKey = $("#googleApiKey").value.trim();
+  if (googleReady()) preloadGoogle();
   saveSettings(); closeSettings(); renderSpend(); if (!activeConvo()) renderThread();
 };
 $("#clearAll").onclick = e => {
@@ -1318,6 +1549,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") { closeSetti
 
 syncOpts();
 renderSpend();
+if (googleReady()) (window.requestIdleCallback || setTimeout)(preloadGoogle);
 renderThread();
 if (!settings.claudeKey || !settings.geminiKey) setTimeout(openSettings, 300);
 </script>

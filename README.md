@@ -21,7 +21,20 @@ The finished piece shows as one document you can copy or download for Word.
 
 **Power:** Auto (default) has a tiny model read each question and pick Economy (Claude Sonnet 5.5 + Gemini 3.8 Flash) for everyday questions or Max (Claude Opus 5.5 + Gemini 4 Argon) for hard or high-stakes ones. You can also force Economy or Max.
 
-Also: PDF, Word, PowerPoint and photo uploads; solo mode (one model, much cheaper); a monthly spend tracker; Download for Word; history backup.
+Also: PDF, Word, PowerPoint and photo uploads; attach from Google Drive (Docs, Slides, Sheets, any file); save results to Google Docs or Google Slides; Create mode can make a slide deck and download it as PowerPoint; solo mode (one model, much cheaper); a monthly spend tracker; Download for Word; history backup.
+
+## Google Drive setup
+One-time, about 10 minutes. It lets the **Drive** button attach files from your Google Drive and lets **Save to Google Docs / Slides** put results there. The app only asks for Google's narrowest Drive permission: it can see files you pick and files it creates, nothing else.
+
+Use your personal Google account. A school account (like Mizzou's) may block apps its admins haven't approved.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com). In the project picker at the top, click **New project**, name it `Council`, click **Create**, then select it.
+2. Turn on two APIs. Open [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com) and click **Enable**. Then open [Google Picker API](https://console.cloud.google.com/apis/library/picker.googleapis.com) and click **Enable**.
+3. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview) and click **Get started**. Enter App name `Council` and your email. For Audience, pick **External**. Enter your email again as the contact, agree, and click **Create**.
+4. Go to [Audience](https://console.cloud.google.com/auth/audience). Under **Test users**, click **Add users**, add your own Gmail address, and save.
+5. Go to [Clients](https://console.cloud.google.com/auth/clients) and click **Create client**. Pick **Web application** and name it `Council`. Under **Authorized JavaScript origins**, click **Add URI** and enter `https://mrbooty42.github.io`. Click **Create**, then copy the **Client ID** (it ends in `.apps.googleusercontent.com`).
+6. Go to [Credentials](https://console.cloud.google.com/apis/credentials) and click **Create credentials** → **API key**. Copy the key. Optional but tidy: click **Edit API key**, choose **Restrict key**, tick **Google Picker API**, and save.
+7. In Council, open **Settings**, paste the Client ID and the API key into the Google fields, and click **Save**. Click **Drive**. The first time, Google asks you to sign in and allow access. If it says the app isn't verified, click **Continue**: it's your own app.
 
 ## Privacy
 The app is one HTML file that runs in your browser. Your API keys and history are stored only in that browser. Questions go straight from your browser to Anthropic and Google. No other server is involved, and nothing private is stored in this repository.
