@@ -1,0 +1,1111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Council</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+/* Layout: one reading column; each question shows the debate (collapsible) above the council's final answer. */
+:root {
+  --bg: #f6f6f3;
+  --surface: #ffffff;
+  --surface-2: #efefea;
+  --fg: #1d1f22;
+  --muted: #62666d;
+  --line: #dcdcd4;
+  --accent: #2c5d50;
+  --accent-fg: #ffffff;
+  --claude: #a35a1f;
+  --claude-soft: #f6e9dc;
+  --gemini: #3d55b8;
+  --gemini-soft: #e4e9f8;
+  --danger: #b3261e;
+  --ok: #2c6e3f;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-read: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --surface: #1d2024; --surface-2: #262a2f; --fg: #e8e8e4; --muted: #9ba0a8;
+    --line: #33383e; --accent: #6fb8a3; --accent-fg: #0d1a16; --claude: #e09a5c; --claude-soft: #33261b;
+    --gemini: #93a6ff; --gemini-soft: #1f2540; --danger: #ff8a80; --ok: #7fcf96; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --surface: #1d2024; --surface-2: #262a2f; --fg: #e8e8e4; --muted: #9ba0a8;
+  --line: #33383e; --accent: #6fb8a3; --accent-fg: #0d1a16; --claude: #e09a5c; --claude-soft: #33261b;
+  --gemini: #93a6ff; --gemini-soft: #1f2540; --danger: #ff8a80; --ok: #7fcf96; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font-ui); }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+
+.app { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); height: 100%; }
+header.top {
+  display: flex; align-items: center; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.brand { font-weight: 600; letter-spacing: .02em; display: flex; align-items: center; gap: 8px; }
+.brand .dots { display: inline-flex; gap: 3px; }
+.brand .dots i { width: 9px; height: 9px; border-radius: 50%; display: block; }
+.brand .dots i:first-child { background: var(--claude); }
+.brand .dots i:last-child { background: var(--gemini); }
+.top .spacer { flex: 1; }
+.iconbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 10px; }
+.iconbtn:hover { background: var(--surface-2); }
+
+main { overflow-y: auto; }
+.column { max-width: 780px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 40px; display: flex; flex-direction: column; gap: 28px; }
+
+.empty { display: flex; flex-direction: column; gap: 14px; padding-top: 6vh; }
+.empty h1 { font: 600 28px/1.2 var(--font-read); margin: 0; text-wrap: balance; }
+.empty p { margin: 0; color: var(--muted); max-width: 60ch; }
+.howto { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 6px; }
+.howto div { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--surface); min-width: 0; }
+.howto b { display: block; font-size: 13px; margin-bottom: 2px; }
+.howto span { color: var(--muted); font-size: 13px; }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; }
+.examples button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 13px; text-align: left; }
+.examples button:hover { border-color: var(--accent); }
+
+.turn { display: flex; flex-direction: column; gap: 12px; }
+.q { align-self: flex-end; max-width: 85%; background: var(--accent); color: var(--accent-fg); padding: 10px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.debate { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.debate > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; font-size: 13px; color: var(--muted); }
+.debate > summary::-webkit-details-marker { display: none; }
+.debate > summary .chev { transition: transform .15s; }
+.debate[open] > summary .chev { transform: rotate(90deg); }
+.debate .status { color: var(--fg); font-weight: 500; }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite; flex: none; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.steps { border-top: 1px solid var(--line); padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 16px; }
+.step h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 640px) { .pair { grid-template-columns: 1fr; } }
+.voice { border-radius: 10px; padding: 10px 12px; min-width: 0; font-size: 14px; position: relative; }
+.voice.claude { background: var(--claude-soft); }
+.voice.gemini { background: var(--gemini-soft); }
+.voice .who { font-size: 12px; font-weight: 600; display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.voice.claude .who { color: var(--claude); }
+.voice.gemini .who { color: var(--gemini); }
+.voice .body { max-height: 240px; overflow: hidden; overflow-wrap: anywhere; }
+.voice.expanded .body { max-height: none; }
+.voice .body > :first-child { margin-top: 0; }
+.voice .more { margin-top: 6px; border: 0; background: none; padding: 0; color: var(--muted); font-size: 12px; text-decoration: underline; }
+.voice .err { color: var(--danger); }
+.voice .cost { margin-left: auto; font: 500 11px/1 var(--font-mono); color: var(--muted); }
+.spend b { color: var(--fg); font-weight: 600; }
+.c-claude { color: var(--claude); }
+.c-gemini { color: var(--gemini); }
+.stance { font-family: var(--font-mono); font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; }
+
+.final { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; font: 17px/1.6 var(--font-read); overflow-wrap: anywhere; }
+.final .label { font: 600 12px/1 var(--font-ui); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin-bottom: 10px; display: flex; gap: 8px; align-items: center; }
+.final h1, .final h2, .final h3 { font-family: var(--font-read); line-height: 1.25; text-wrap: balance; }
+.final h2 { font-size: 20px; margin: 1.3em 0 .4em; }
+.final h3 { font-size: 17px; margin: 1.2em 0 .3em; }
+.final > .md > :first-child { margin-top: 0; }
+.md table { border-collapse: collapse; font: 14px/1.4 var(--font-ui); }
+.md th, .md td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; }
+.md .tablewrap { overflow-x: auto; }
+.md pre { background: var(--surface-2); padding: 10px; border-radius: 8px; overflow-x: auto; font: 13px/1.45 var(--font-mono); }
+.md code { font-family: var(--font-mono); font-size: .88em; }
+.md blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font: 12px/1.4 var(--font-ui); color: var(--muted); }
+.meta button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+.sources { font: 13px/1.5 var(--font-ui); margin-top: 10px; }
+.sources summary { cursor: pointer; color: var(--muted); }
+.sources ol { margin: 6px 0 0; padding-left: 20px; }
+.sources li { overflow-wrap: anywhere; }
+.errorbox { border: 1px solid var(--danger); color: var(--danger); background: var(--surface); padding: 10px 14px; border-radius: 10px; font-size: 14px; }
+
+footer.composer { border-top: 1px solid var(--line); background: var(--surface); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); }
+.composer-inner { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.inputrow { display: flex; gap: 8px; align-items: flex-end; }
+.inputrow textarea { flex: 1; min-width: 0; resize: none; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--bg); max-height: 40vh; line-height: 1.45; }
+.send { border: 0; background: var(--accent); color: var(--accent-fg); border-radius: 12px; padding: 10px 16px; font-weight: 600; }
+.send:disabled { opacity: .45; cursor: default; }
+.send.stop { background: var(--danger); color: #fff; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 3px 10px; font-size: 13px; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--fg); font-weight: 500; }
+.opts label { display: inline-flex; gap: 6px; align-items: center; }
+
+/* Drawer (history) and dialog (settings) */
+.scrim { position: fixed; inset: 0; background: rgb(0 0 0 / .35); z-index: 10; }
+.drawer { position: fixed; top: 0; bottom: 0; left: 0; width: min(320px, 86vw); background: var(--surface); border-right: 1px solid var(--line); z-index: 11; display: flex; flex-direction: column; padding: calc(14px + env(safe-area-inset-top, 0px)) 14px 14px; gap: 10px; }
+.drawer h3 { margin: 0; font-size: 14px; }
+.drawer .list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.drawer .item { display: flex; align-items: center; gap: 4px; border-radius: 8px; }
+.drawer .item button.open { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 8px; }
+.drawer .item.active button.open, .drawer .item button.open:hover { background: var(--surface-2); }
+.drawer .item button.del { border: 0; background: none; color: var(--muted); padding: 6px 8px; }
+.newbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px; font-weight: 500; }
+.dialog { position: fixed; inset: 0; z-index: 12; display: grid; place-items: center; padding: 16px; }
+.dialog .card { width: min(560px, 100%); max-height: 90vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.dialog h2 { margin: 0; font-size: 18px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-weight: 500; font-size: 14px; }
+.field .hint { font-size: 12px; color: var(--muted); }
+.field input, .field select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); width: 100%; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 480px) { .row2 { grid-template-columns: 1fr; } }
+.dialog .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.dialog .actions .danger { margin-right: auto; border: 1px solid var(--line); background: none; color: var(--danger); border-radius: 8px; padding: 8px 12px; }
+.dialog .actions .primary { border: 0; background: var(--accent); color: var(--accent-fg); border-radius: 8px; padding: 8px 16px; font-weight: 600; }
+.dialog .actions .plain { border: 1px solid var(--line); background: none; border-radius: 8px; padding: 8px 12px; }
+.spendpill { font: 500 12px/1 var(--font-mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; white-space: nowrap; }
+@media (max-width: 520px) {
+  header.top { gap: 8px; }
+  .brand .name { display: none; }
+  .spendpill .long { display: none; }
+  .iconbtn { padding: 6px 8px; }
+}
+@media (min-width: 521px) { .spendpill .short { display: none; } }
+.spendpill.over { color: var(--danger); border-color: var(--danger); }
+.attach { border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; flex: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; background: var(--surface-2); border-radius: 999px; padding: 3px 4px 3px 10px; max-width: 100%; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chip button { border: 0; background: none; color: var(--muted); padding: 0 6px; }
+.warn { font-size: 13px; color: var(--danger); }
+.opts select { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 3px 6px; font-size: 13px; }
+.qfiles { align-self: flex-end; font-size: 12px; color: var(--muted); }
+.field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); width: 100%; resize: vertical; min-height: 90px; line-height: 1.45; }
+.backup { display: flex; gap: 8px; flex-wrap: wrap; }
+.backup button, .backup label { border: 1px solid var(--line); background: none; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+.final details { margin: .6em 0; }
+.final summary { cursor: pointer; color: var(--accent); }
+.note { font-size: 13px; color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <button class="iconbtn" id="historyBtn" aria-label="Past questions">☰</button>
+    <div class="brand"><span class="dots"><i></i><i></i></span><span class="name">Council</span></div>
+    <div class="spacer"></div>
+    <span class="spendpill" id="spendPill" title="Estimated spend this month"></span>
+    <button class="iconbtn" id="newBtn">New</button>
+    <button class="iconbtn" id="settingsBtn">Settings</button>
+  </header>
+
+  <main id="main"><div class="column" id="thread"></div></main>
+
+  <footer class="composer">
+    <div class="composer-inner">
+      <div class="chips" id="chips" hidden></div>
+      <div class="inputrow">
+        <button class="attach" id="attachBtn" title="Attach PDFs, Word or PowerPoint files, photos or text files" aria-label="Attach files">📎</button>
+        <input type="file" id="fileInput" multiple hidden accept=".pdf,.docx,.pptx,.txt,.md,.csv,.json,image/*">
+        <textarea id="input" rows="1" placeholder="Ask the council anything…" aria-label="Your question"></textarea>
+        <button class="send" id="sendBtn">Ask</button>
+      </div>
+      <div class="warn" id="warn" hidden></div>
+      <div class="opts">
+        <label>Mode
+          <select id="modeSel" aria-label="Mode">
+            <option value="general">General</option>
+            <option value="research">Research</option>
+            <option value="study">Study</option>
+            <option value="business">Business</option>
+            <option value="decision">Life decision</option>
+          </select>
+        </label>
+        <span class="seg" id="whoSeg" role="group" aria-label="Who answers">
+          <button data-who="council" aria-pressed="true" title="Both models debate">Both</button>
+          <button data-who="claude" aria-pressed="false" title="Claude answers alone, much cheaper">Claude</button>
+          <button data-who="gemini" aria-pressed="false" title="Gemini answers alone, much cheaper">Gemini</button>
+        </span>
+        <span class="seg" id="depthSeg" role="group" aria-label="Debate depth">
+          <button data-depth="1" aria-pressed="false" title="1 round of critique">Quick</button>
+          <button data-depth="2" aria-pressed="true" title="2 rounds of critique">Standard</button>
+          <button data-depth="3" aria-pressed="false" title="3 rounds of critique">Deep</button>
+        </span>
+        <label><input type="checkbox" id="searchToggle" checked> Web search</label>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden>
+  <h3>Past questions</h3>
+  <button class="newbtn" id="drawerNew">+ New question</button>
+  <div class="list" id="convoList"></div>
+</aside>
+
+<div class="dialog" id="settings" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="card">
+    <h2 id="settingsTitle">Settings</h2>
+    <div class="note">Your keys are saved only in this browser on this device. Questions go straight from this page to Anthropic and Google. No other server is involved.</div>
+    <div class="field">
+      <label for="claudeKey">Claude API key</label>
+      <input id="claudeKey" type="password" autocomplete="off" placeholder="sk-ant-…">
+      <span class="hint">From console.anthropic.com → API Keys. Billed per use, separate from Claude Pro.</span>
+    </div>
+    <div class="field">
+      <label for="geminiKey">Gemini API key</label>
+      <input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…">
+      <span class="hint">From aistudio.google.com → Get API key. Turn on billing for the strong models and so Google doesn't train on your data.</span>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="geminiModel">Gemini model</label>
+        <select id="geminiModel">
+          <option value="gemini-4-argon">Gemini 4 Argon (strongest)</option>
+          <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+          <option value="gemini-3.8-flash">Gemini 3.8 Flash (cheap, free tier)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="effort">Claude thinking depth</label>
+        <select id="effort">
+          <option value="medium">Medium (faster)</option>
+          <option value="high">High</option>
+          <option value="xhigh">Extra high (slowest)</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="about">About me</label>
+      <textarea id="about" placeholder="Example: I'm a 2nd-year business student at ___. I run a small ___ business (about $__/month revenue). Goals this year: ___. I prefer short answers with numbers."></textarea>
+      <span class="hint">Sent with every question so the models know your situation. Leave out anything you wouldn't share with Anthropic and Google.</span>
+    </div>
+    <div class="row2">
+    <div class="field">
+      <label for="budget">Monthly budget ($)</label>
+      <input id="budget" type="number" min="0" step="1">
+      <span class="hint">The app warns you before going over it.</span>
+    </div>
+    <div class="field">
+      <label for="judge">Who writes the final answer</label>
+      <select id="judge">
+        <option value="claude">Claude</option>
+        <option value="gemini">Gemini</option>
+      </select>
+      <span class="hint">That model merges both sides fairly and lists anything still unresolved.</span>
+    </div>
+    </div>
+    <div class="field">
+      <label>History backup</label>
+      <div class="backup">
+        <button id="exportBtn" type="button">Download backup</button>
+        <label for="importInput">Restore from backup</label>
+        <input type="file" id="importInput" accept=".json,application/json" hidden>
+      </div>
+      <span class="hint" id="backupHint">Saves your questions and answers to a file (not your keys). Use it to move your history to another device.</span>
+    </div>
+    <div class="actions">
+      <button class="danger" id="clearAll">Delete all history</button>
+      <button class="plain" id="settingsCancel">Cancel</button>
+      <button class="primary" id="settingsSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- Storage (all wrapped: storage can be blocked) ---------- */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
+};
+const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", effort: "high", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council" };
+let settings = Object.assign({}, DEFAULT_SETTINGS, store.get("council.settings", {}));
+let convos = store.get("council.convos", []);
+let activeId = store.get("council.active", null);
+const saveSettings = () => store.set("council.settings", settings);
+const noPrivate = (k, v) => (k.startsWith("_") ? undefined : v);
+function saveConvosRaw() { try { localStorage.setItem("council.convos", JSON.stringify(convos, noPrivate)); return true; } catch { return false; } }
+function saveConvos() {
+  if (!saveConvosRaw()) {
+    // Storage full: drop debate transcripts of the oldest conversations, keep final answers.
+    for (const c of convos.slice().reverse()) for (const t of c.turns) t.steps = [];
+    saveConvosRaw();
+  }
+  store.set("council.active", activeId);
+}
+
+/* ---------- Monthly spend ledger ---------- */
+const monthKey = () => new Date().toISOString().slice(0, 7);
+let ledger = store.get("council.spend", {});
+const spentThisMonth = () => ledger[monthKey()] || 0;
+function addSpend(n) { if (!n) return; ledger[monthKey()] = spentThisMonth() + n; store.set("council.spend", ledger); renderSpend(); }
+function renderSpend() {
+  const pill = document.getElementById("spendPill"); if (!pill) return;
+  const m = new Date().toLocaleString(undefined, { month: "short" });
+  const b = +settings.budget || 0;
+  pill.innerHTML = "";
+  pill.appendChild(el("span", "long", b ? `${m}: ${money(spentThisMonth())} of $${b}` : `${m}: ${money(spentThisMonth())}`));
+  pill.appendChild(el("span", "short", b ? `${money(spentThisMonth())}/$${b}` : money(spentThisMonth())));
+  pill.classList.toggle("over", b > 0 && spentThisMonth() >= b);
+}
+
+/* ---------- Models and prices (USD per 1M tokens) ---------- */
+const CLAUDE_MODEL = "claude-opus-5-5";
+const PRICES = {
+  "claude-opus-5-5": { in: 4, out: 20 },
+  "gemini-4-argon": { in: 2, out: 10 },
+  "gemini-3.1-pro-preview": { in: 2, out: 12 },
+  "gemini-3.8-flash": { in: 0.75, out: 3.75 },
+};
+const CLAUDE_SEARCH_PRICE = 0.01; // per search
+
+/* ---------- Server-sent events reader ---------- */
+// Some embedded viewers proxy fetch and can't pass an abort signal; retry without it there.
+async function safeFetch(url, opts) {
+  try { return await fetch(url, opts); }
+  catch (e) {
+    if (opts.signal && /clone|AbortSignal/i.test(e.message || "")) { const o = Object.assign({}, opts); delete o.signal; return await fetch(url, o); }
+    if (e.name === "TypeError") throw new Error("The request was blocked before it reached the model. Open this file directly in Chrome or Safari, not inside a preview window.");
+    throw e;
+  }
+}
+async function* readSSE(response, signal) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    if (signal && signal.aborted) throw new DOMException("Stopped", "AbortError");
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) !== -1) {
+      const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      let event = "message", data = "";
+      for (const line of raw.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).replace(/^ /, "");
+      }
+      if (data) yield { event, data };
+    }
+  }
+}
+
+async function readError(res, who) {
+  let msg = `${who} returned error ${res.status}.`;
+  try { const j = await res.json(); const m = j.error?.message || j.message; if (m) msg = `${who}: ${m}`; } catch {}
+  if (res.status === 401 || res.status === 403) msg += ` Check your ${who} API key in Settings.`;
+  if (res.status === 429) msg += " You've hit a rate or spending limit. Wait a minute, or check billing.";
+  const e = new Error(msg); e.status = res.status; return e;
+}
+
+/* ---------- Claude ---------- */
+function claudeContent(prompt, files) {
+  if (!files || !files.length) return prompt;
+  const parts = [];
+  for (const f of files) {
+    if (f.kind === "pdf") parts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.data }, title: f.name });
+    else if (f.kind === "image") parts.push({ type: "image", source: { type: "base64", media_type: f.mime, data: f.data } });
+    else parts.push({ type: "text", text: `Attached file "${f.name}":\n${f.text}` });
+  }
+  parts.push({ type: "text", text: prompt });
+  return parts;
+}
+async function callClaude({ system, prompt, search, onText, signal, files }) {
+  const messages = [{ role: "user", content: claudeContent(prompt, files) }];
+  const usage = { in: 0, out: 0, searches: 0 };
+  const sources = [];
+  let text = "";
+  for (let hop = 0; hop < 4; hop++) {
+    const body = {
+      model: CLAUDE_MODEL, max_tokens: 32000, stream: true,
+      thinking: { type: "adaptive" }, output_config: { effort: settings.effort },
+      fallbacks: "default", system, messages,
+    };
+    if (search) body.tools = [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }];
+    let res;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await safeFetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", signal,
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": settings.claudeKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "server-side-fallback-2026-07-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(body),
+      });
+      if (res.status !== 529 && res.status !== 500 && res.status !== 503) break;
+      await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+    }
+    if (!res.ok) throw await readError(res, "Claude");
+
+    const blocks = [];
+    let stop = null;
+    for await (const ev of readSSE(res, signal)) {
+      let d; try { d = JSON.parse(ev.data); } catch { continue; }
+      if (d.type === "error") throw new Error("Claude: " + (d.error?.message || "stream error"));
+      if (d.type === "message_start") usage.in += d.message?.usage?.input_tokens || 0;
+      else if (d.type === "content_block_start") {
+        const b = JSON.parse(JSON.stringify(d.content_block));
+        blocks[d.index] = b;
+        if (b.type === "web_search_tool_result" && Array.isArray(b.content))
+          for (const r of b.content) if (r.url) sources.push({ url: r.url, title: r.title });
+      } else if (d.type === "content_block_delta") {
+        const b = blocks[d.index]; const x = d.delta;
+        if (!b) continue;
+        if (x.type === "text_delta") { b.text = (b.text || "") + x.text; text += x.text; onText && onText(text); }
+        else if (x.type === "thinking_delta") b.thinking = (b.thinking || "") + x.thinking;
+        else if (x.type === "signature_delta") b.signature = (b.signature || "") + x.signature;
+        else if (x.type === "input_json_delta") b._json = (b._json || "") + x.partial_json;
+        else if (x.type === "citations_delta") {
+          (b.citations = b.citations || []).push(x.citation);
+          if (x.citation?.url) sources.push({ url: x.citation.url, title: x.citation.title });
+        }
+      } else if (d.type === "content_block_stop") {
+        const b = blocks[d.index];
+        if (b && "_json" in b) { try { b.input = JSON.parse(b._json || "{}"); } catch { b.input = {}; } delete b._json; }
+      } else if (d.type === "message_delta") {
+        stop = d.delta?.stop_reason || stop;
+        if (d.usage) { usage.out += d.usage.output_tokens || 0; usage.searches += d.usage.server_tool_use?.web_search_requests || 0; }
+      }
+    }
+    if (stop === "refusal") throw new Error("Claude declined to answer this one.");
+    if (stop === "pause_turn") { messages.push({ role: "assistant", content: blocks.filter(Boolean) }); continue; }
+    break;
+  }
+  const cost = (usage.in * PRICES[CLAUDE_MODEL].in + usage.out * PRICES[CLAUDE_MODEL].out) / 1e6 + usage.searches * CLAUDE_SEARCH_PRICE;
+  return { text: text.trim(), sources, cost };
+}
+
+/* ---------- Gemini ---------- */
+async function callGemini({ system, prompt, search, onText, signal, files }) {
+  const model = settings.geminiModel;
+  const parts = [];
+  for (const f of files || []) {
+    if (f.kind === "text") parts.push({ text: `Attached file "${f.name}":\n${f.text}` });
+    else parts.push({ inlineData: { mimeType: f.mime, data: f.data } });
+  }
+  parts.push({ text: prompt });
+  const body = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: "user", parts }],
+    generationConfig: { maxOutputTokens: 32768 },
+  };
+  if (search) body.tools = [{ google_search: {} }];
+  let res;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await safeFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+      method: "POST", signal,
+      headers: { "content-type": "application/json", "x-goog-api-key": settings.geminiKey },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 500 && res.status !== 503) break;
+    await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+  }
+  if (!res.ok) throw await readError(res, "Gemini");
+  let text = "", usage = null, finish = null;
+  const sources = [];
+  for await (const ev of readSSE(res, signal)) {
+    let d; try { d = JSON.parse(ev.data); } catch { continue; }
+    if (d.error) throw new Error("Gemini: " + (d.error.message || "stream error"));
+    const c = d.candidates?.[0];
+    if (c) {
+      for (const p of c.content?.parts || []) if (p.text && !p.thought) { text += p.text; onText && onText(text); }
+      for (const g of c.groundingMetadata?.groundingChunks || []) if (g.web?.uri) sources.push({ url: g.web.uri, title: g.web.title });
+      if (c.finishReason) finish = c.finishReason;
+    }
+    if (d.usageMetadata) usage = d.usageMetadata;
+  }
+  if (!text && finish && finish !== "STOP") throw new Error(`Gemini stopped without answering (${finish}).`);
+  const p = PRICES[model] || PRICES["gemini-3.1-pro-preview"];
+  const cost = usage ? ((usage.promptTokenCount || 0) * p.in + ((usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0)) * p.out) / 1e6 : 0;
+  return { text: text.trim(), sources, cost };
+}
+
+/* ---------- The council's rules ---------- */
+const NAMES = { claude: "Claude", gemini: "Gemini" };
+const OTHER = { claude: "gemini", gemini: "claude" };
+
+const MODES = {
+  general: "",
+  research: "Mode: Research. Accuracy and sourcing come first. Search widely, prefer primary sources (studies, official data, filings, original reporting), link every key claim, and flag where the evidence is thin, old or contested.",
+  study: "Mode: Study. Drew is a university student learning this material. Explain from first principles with a concrete example, point out the mistakes students usually make, and match what a professor would expect. The final answer must end with a \"## Check yourself\" section: three short practice questions, followed by their answers inside <details><summary>Answers</summary> ... </details>.",
+  business: "Mode: Business. Be commercially practical: use real numbers (costs, prices, margins, market size, time to results), name concrete next steps, and call out risks, legal or tax issues, and the most likely reasons this would fail. No motivational filler.",
+  decision: "Mode: Life decision. Lay out the realistic options and the tradeoffs of each (money, time, risk, how reversible it is), say what information would change the answer, and end with a clear recommendation.",
+};
+function systemFor(me, turn) {
+  const extra = [MODES[turn?.mode] || "", settings.about ? `About Drew, in his own words:\n${settings.about}` : ""].filter(Boolean).join("\n\n");
+  return systemBase(me) + (extra ? "\n\n" + extra : "");
+}
+function systemBase(me) {
+  return `You are ${NAMES[me]}, one of two members of an AI council working for one person, Drew. Your partner is ${NAMES[OTHER[me]]}, built by a different company and trained differently. You debate each question so Drew gets the best possible answer, not the most agreeable one. Drew uses the council for deep research, university study, growing his business and other ventures, and hard everyday decisions. He is a sharp non-programmer who wants direct, useful answers without fluff.
+
+Rules of the council:
+- Truth over harmony. Never agree to be polite. Concede a point only when the argument or evidence actually beats yours, and say what changed your mind.
+- Be specific. Name the exact claim, number or step you dispute and say why.
+- Separate what you know, what you infer, and what you are guessing. Give a confidence level on claims that matter.
+- Check facts that matter when you can search, prefer primary sources, and include links to the sources you rely on.
+- Write in plain language. No filler, no throat-clearing.`;
+}
+
+function contextBlock(convo, uptoIndex) {
+  const prior = convo.turns.slice(0, uptoIndex).filter(t => t.final?.text).slice(-4);
+  if (!prior.length) return "";
+  return "Earlier in this conversation, for context:\n" + prior.map(t =>
+    `Drew asked: ${t.q}\nCouncil answer: ${t.final.text.slice(0, 4000)}`).join("\n\n") + "\n\n---\n\n";
+}
+
+const P = {
+  opening: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nGive your own best answer. Your partner is answering separately at the same time, and next you will critique each other, so commit to clear positions instead of hedging. End with a short list of the claims you are least sure about.`,
+  critique: (ctx, q, mine, theirs, other) => `${ctx}Drew's question:\n${q}\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nYour own current answer, for reference:\n<<<\n${mine}\n>>>\n\nCritique ${other}'s answer hard. Look for factual errors, weak or missing evidence, flawed reasoning, important things it leaves out, and advice that would not survive real life. Verify doubtful claims if you can search. Rank the problems by how much they would hurt Drew if he acted on the answer. Then say briefly what it gets right that your answer missed. Do not rewrite either answer yet.`,
+  revise: (ctx, q, mine, critique, theirs, other) => `${ctx}Drew's question:\n${q}\n\nYour current answer:\n<<<\n${mine}\n>>>\n\n${other}'s critique of your answer:\n<<<\n${critique}\n>>>\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nFirst, under "## Response to critique", go through the critique point by point: concede what is right and push back on what is wrong, with reasons. Then write your complete improved answer under "## Revised answer", taking anything better from ${other}'s answer. On the very last line write exactly one of these and nothing else:\nSTANCE: AGREE (you would sign ${other}'s answer as it stands)\nSTANCE: MOSTLY AGREE\nSTANCE: DISAGREE`,
+  solo: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nThis time you are answering alone, without your partner, so check your own work: verify claims that matter and say where you are unsure.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nKeep links to the sources behind the key claims.`,
+  final: (ctx, q, a, b, ca, cb) => `${ctx}Drew's question:\n${q}\n\nThe debate is over. Here is where it ended.\n\nClaude's final answer:\n<<<\n${a}\n>>>\n\nGemini's final answer:\n<<<\n${b}\n>>>\n\nClaude's last critique of Gemini:\n<<<\n${ca}\n>>>\n\nGemini's last critique of Claude:\n<<<\n${cb}\n>>>\n\nWrite the council's single final answer for Drew. Be fair: build it from the strongest parts of both answers, not from your own by default, and drop anything that was shown to be wrong.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- Then "## Where the council disagrees", only if a real disagreement remains. State each side in a sentence, and which one you would bet on and why. Leave this section out if they agree.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nDo not describe the debate or mention rounds. Keep links to the sources behind the key claims.`,
+};
+
+function revisedPart(text) {
+  const m = text.split(/^##\s*Revised answer\s*$/im);
+  const body = m.length > 1 ? m.slice(1).join("") : text;
+  return body.replace(/\n?STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE).*$/i, "").trim();
+}
+function stanceOf(text) {
+  const m = text.match(/STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE)/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/* ---------- Running a debate ---------- */
+let running = null; // AbortController while a debate runs
+
+function call(who, opts) { return who === "claude" ? callClaude(opts) : callGemini(opts); }
+
+async function runCouncil(convo, turnIndex) {
+  const turn = convo.turns[turnIndex];
+  const ctx = contextBlock(convo, turnIndex);
+  const q = turn.q;
+  const search = turn.search;
+  const signal = running.signal;
+  turn.cost = 0;
+  turn.costBy = { claude: 0, gemini: 0 };
+
+  const view = renderTurn(convo, turnIndex, true);
+
+  async function pairStep(label, kind, makePrompt, useSearch, files) {
+    const step = { label, kind, claude: { text: "" }, gemini: { text: "" } };
+    turn.steps.push(step);
+    view.addStep(step);
+    const runOne = async who => {
+      try {
+        const r = await call(who, {
+          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files,
+          onText: t => { step[who].text = t; view.updateVoice(step, who); },
+        });
+        step[who].text = r.text; step[who].sources = r.sources; step[who].cost = r.cost; turn.cost += r.cost; turn.costBy[who] += r.cost;
+        view.updateVoice(step, who);
+        return r;
+      } catch (e) {
+        if (e.name === "AbortError") throw e;
+        step[who].error = e.message; view.updateVoice(step, who);
+        throw e;
+      }
+    };
+    const results = await Promise.allSettled([runOne("claude"), runOne("gemini")]);
+    const aborted = results.find(r => r.status === "rejected" && r.reason?.name === "AbortError");
+    if (aborted) throw aborted.reason;
+    const failed = results.find(r => r.status === "rejected");
+    if (failed) throw failed.reason;
+    saveConvos();
+    return { claude: results[0].value.text, gemini: results[1].value.text };
+  }
+
+  try {
+    const files = turn._files || [];
+    if (turn.who !== "council") {
+      const solo = turn.who;
+      view.status(`${NAMES[solo]} is answering alone`);
+      turn.final = { text: "", by: solo };
+      view.showFinal();
+      const r = await call(solo, {
+        system: systemFor(solo, turn), prompt: P.solo(ctx, q), search, signal, files,
+        onText: t => { turn.final.text = t; view.updateFinal(); },
+      });
+      turn.cost += r.cost; turn.costBy[solo] += r.cost;
+      turn.final = { text: r.text, by: solo, sources: dedupe(r.sources) };
+      turn.status = "done";
+      view.updateFinal(true);
+      view.status(`Answered by ${NAMES[solo]} alone`, true);
+      return;
+    }
+    view.status("Opening statements: both models are answering");
+    // Files go to the opening and critique steps, where facts get stated and checked.
+    let ans = await pairStep("Opening statements", "opening", () => P.opening(ctx, q), search, files);
+    let lastCrit = { claude: "", gemini: "" };
+    const rounds = turn.depth;
+    for (let r = 1; r <= rounds; r++) {
+      view.status(`Round ${r} of ${rounds}: cross-examining`);
+      const crit = await pairStep(`Round ${r} · Critique`, "critique",
+        who => P.critique(ctx, q, ans[who], ans[OTHER[who]], NAMES[OTHER[who]]), search, files);
+      view.status(`Round ${r} of ${rounds}: revising`);
+      const rev = await pairStep(`Round ${r} · Rebuttal and revision`, "revise",
+        who => P.revise(ctx, q, ans[who], crit[OTHER[who]], ans[OTHER[who]], NAMES[OTHER[who]]), search);
+      lastCrit = crit;
+      const stances = { claude: stanceOf(rev.claude), gemini: stanceOf(rev.gemini) };
+      ans = { claude: revisedPart(rev.claude), gemini: revisedPart(rev.gemini) };
+      if (stances.claude === "AGREE" && stances.gemini === "AGREE" && r < rounds) {
+        view.note(`Both models agreed after round ${r}, so the remaining rounds were skipped.`);
+        break;
+      }
+    }
+    const judge = turn.judge;
+    view.status(`${NAMES[judge]} is writing the final answer`);
+    turn.final = { text: "", by: judge };
+    view.showFinal();
+    const fin = await call(judge, {
+      system: systemFor(judge, turn), search: false, signal,
+      prompt: P.final(ctx, q, ans.claude, ans.gemini, lastCrit.claude, lastCrit.gemini),
+      onText: t => { turn.final.text = t; view.updateFinal(); },
+    });
+    turn.cost += fin.cost; turn.costBy[judge] += fin.cost;
+    const all = [];
+    for (const s of turn.steps) for (const w of ["claude", "gemini"]) for (const src of s[w].sources || []) all.push(src);
+    turn.final = { text: fin.text, by: judge, sources: dedupe(all) };
+    turn.status = "done";
+    view.updateFinal(true);
+    view.status(`Debate finished: ${turn.steps.length} steps`, true);
+  } catch (e) {
+    turn.status = e.name === "AbortError" ? "stopped" : "error";
+    turn.error = e.name === "AbortError" ? "You stopped this debate." : e.message;
+    view.status(turn.status === "stopped" ? "Stopped" : "Something went wrong", true);
+    view.error(turn.error);
+  } finally {
+    delete turn._files;
+    addSpend(turn.cost);
+    saveConvos();
+  }
+}
+function dedupe(list) { const seen = new Set(); return (list || []).filter(s => s.url && !seen.has(s.url) && seen.add(s.url)); }
+
+/* ---------- Rendering ---------- */
+const $ = s => document.querySelector(s);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+
+if (window.DOMPurify) DOMPurify.addHook("afterSanitizeAttributes", n => {
+  if (n.tagName === "A") { n.setAttribute("target", "_blank"); n.setAttribute("rel", "noopener noreferrer"); }
+});
+function md(text) {
+  const div = el("div", "md");
+  if (window.marked && window.DOMPurify) {
+    div.innerHTML = DOMPurify.sanitize(marked.parse(text || "", { gfm: true, breaks: false }));
+    div.querySelectorAll("table").forEach(t => { const w = el("div", "tablewrap"); t.replaceWith(w); w.appendChild(t); });
+  } else { div.style.whiteSpace = "pre-wrap"; div.textContent = text || ""; }
+  return div;
+}
+const money = n => n < 0.01 ? "<$0.01" : "$" + n.toFixed(2);
+
+function throttle(fn) {
+  let pending = false;
+  return () => { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; fn(); }); };
+}
+
+function activeConvo() { return convos.find(c => c.id === activeId) || null; }
+
+function renderThread() {
+  const thread = $("#thread");
+  thread.innerHTML = "";
+  const c = activeConvo();
+  if (!c || !c.turns.length) { thread.appendChild(renderEmpty()); return; }
+  c.turns.forEach((t, i) => renderTurn(c, i, false));
+  scrollToEnd();
+}
+
+function renderEmpty() {
+  const wrap = el("div", "empty");
+  wrap.appendChild(el("h1", null, "Two models argue it out. You get one answer."));
+  wrap.appendChild(el("p", null, "Claude and Gemini each answer your question, attack each other's reasoning, revise, and then merge the strongest version into one answer. Anything they still disagree on is spelled out."));
+  const how = el("div", "howto");
+  [["1 · Opening", "Both answer on their own, with web search."],
+   ["2 · Cross-examine", "Each finds the other's errors and gaps."],
+   ["3 · Revise", "Each concedes or defends, then improves."],
+   ["4 · Verdict", "One merged answer plus open disagreements."]]
+    .forEach(([b, s]) => { const d = el("div"); d.appendChild(el("b", null, b)); d.appendChild(el("span", null, s)); how.appendChild(d); });
+  wrap.appendChild(how);
+  if (!settings.claudeKey || !settings.geminiKey) {
+    const n = el("div", "note");
+    n.textContent = "Add your Claude and Gemini API keys in Settings to start.";
+    const b = el("button", "iconbtn", "Open Settings"); b.style.marginLeft = "8px"; b.onclick = openSettings;
+    n.appendChild(b); wrap.appendChild(n);
+  }
+  const ex = el("div", "examples");
+  ["Is it smarter to pay down my 6% student loan or invest the extra $500 a month?",
+   "Explain the difference between correlation and causation with examples a professor would accept.",
+   "What are the three biggest risks in starting a mobile car-detailing business, and how do I reduce each?"]
+    .forEach(t => { const b = el("button", null, t); b.onclick = () => { $("#input").value = t; autosize(); $("#input").focus(); }; ex.appendChild(b); });
+  wrap.appendChild(ex);
+  return wrap;
+}
+
+function renderTurn(convo, index, live) {
+  const t = convo.turns[index];
+  const thread = $("#thread");
+  if (thread.querySelector(".empty")) thread.innerHTML = "";
+  const box = el("section", "turn");
+  box.appendChild(el("div", "q", t.q));
+  if (t.files?.length) box.appendChild(el("div", "qfiles", "📎 " + t.files.join(", ")));
+
+  const det = el("details", "debate");
+  if (t.who && t.who !== "council") det.hidden = true;
+  det.open = live;
+  const sum = el("summary");
+  const chev = el("span", "chev", "▸");
+  const pulse = el("span", "pulse");
+  const status = el("span", "status", t.status === "done" ? `Debate: ${t.steps.length} steps` : (t.status === "error" ? "Something went wrong" : t.status === "stopped" ? "Stopped" : ""));
+  const hint = el("span", null, "Show the debate");
+  sum.append(chev, pulse, status, hint);
+  pulse.hidden = !live;
+  det.appendChild(sum);
+  const steps = el("div", "steps");
+  det.appendChild(steps);
+  det.addEventListener("toggle", () => { hint.textContent = det.open ? "Hide the debate" : "Show the debate"; });
+  hint.textContent = det.open ? "Hide the debate" : "Show the debate";
+  box.appendChild(det);
+
+  const finalBox = el("div", "final"); finalBox.hidden = true;
+  const errBox = el("div", "errorbox"); errBox.hidden = true;
+  box.append(finalBox, errBox);
+  thread.appendChild(box);
+
+  const voiceEls = new Map();
+  function voiceEl(step, who) {
+    const v = el("div", "voice " + who);
+    const head = el("div", "who"); head.appendChild(el("span", null, NAMES[who]));
+    const stance = el("span", "stance"); stance.hidden = true; head.appendChild(stance);
+    const cost = el("span", "cost"); cost.hidden = true; head.appendChild(cost);
+    const body = el("div", "body");
+    const more = el("button", "more", "Show all"); more.hidden = true;
+    more.onclick = () => { v.classList.toggle("expanded"); more.textContent = v.classList.contains("expanded") ? "Show less" : "Show all"; };
+    v.append(head, body, more);
+    const draw = () => {
+      const s = step[who];
+      body.innerHTML = "";
+      if (s.error) body.appendChild(el("div", "err", s.error));
+      else if (!s.text) body.appendChild(el("span", null, "Thinking…")).style.color = "var(--muted)";
+      else body.appendChild(md(s.text.replace(/\n?STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE).*$/i, "")));
+      const st = s.text && stanceOf(s.text);
+      stance.hidden = !st; if (st) stance.textContent = st.toLowerCase();
+      cost.hidden = s.cost == null; if (s.cost != null) cost.textContent = money(s.cost);
+      more.hidden = body.scrollHeight <= 250 && !v.classList.contains("expanded");
+    };
+    return { node: v, draw: throttle(draw), drawNow: draw };
+  }
+  function addStep(step) {
+    const s = el("div", "step");
+    s.appendChild(el("h4", null, step.label));
+    const pair = el("div", "pair");
+    const a = voiceEl(step, "claude"), b = voiceEl(step, "gemini");
+    pair.append(a.node, b.node); s.appendChild(pair); steps.appendChild(s);
+    voiceEls.set(step, { claude: a, gemini: b });
+    requestAnimationFrame(() => { a.drawNow(); b.drawNow(); });
+  }
+  function drawFinal() {
+    finalBox.innerHTML = "";
+    const label = el("div", "label", "Council answer");
+    finalBox.appendChild(label);
+    finalBox.appendChild(md(t.final?.text || "…"));
+    if (t.status === "done") {
+      const meta = el("div", "meta");
+      const modeName = { general: "", research: "Research", study: "Study", business: "Business", decision: "Life decision" }[t.mode || "general"];
+      const how = t.who && t.who !== "council" ? `Answered by ${NAMES[t.who]} alone` : `Final draft by ${NAMES[t.final.by] || "Claude"} · ${["", "Quick", "Standard", "Deep"][t.depth]} debate`;
+      meta.appendChild(el("span", null, how + (modeName ? ` · ${modeName} mode` : "")));
+      const spend = el("span", "spend");
+      spend.append("Spent ≈ ", el("b", null, money(t.cost || 0)));
+      if (t.costBy && (!t.who || t.who === "council")) {
+        spend.append(" · "); spend.appendChild(el("span", "c-claude", `Claude ${money(t.costBy.claude)}`));
+        spend.append(" · "); spend.appendChild(el("span", "c-gemini", `Gemini ${money(t.costBy.gemini)}`));
+      }
+      meta.appendChild(spend);
+      const copy = el("button", null, "Copy answer");
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(t.final.text); copy.textContent = "Copied"; }
+        catch { copy.textContent = "Copy failed"; }
+        setTimeout(() => copy.textContent = "Copy answer", 1500);
+      };
+      meta.appendChild(copy);
+      const save = el("button", null, "Download for Word");
+      save.onclick = () => downloadAnswer(t);
+      meta.appendChild(save);
+      finalBox.appendChild(meta);
+      if (t.final.sources?.length) {
+        const d = el("details", "sources");
+        d.appendChild(el("summary", null, `${t.final.sources.length} sources consulted during the debate`));
+        const ol = el("ol");
+        t.final.sources.slice(0, 40).forEach(s => {
+          const li = el("li"); const a = el("a", null, s.title || s.url);
+          a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; li.appendChild(a); ol.appendChild(li);
+        });
+        d.appendChild(ol); finalBox.appendChild(d);
+      }
+    }
+  }
+  const drawFinalT = throttle(drawFinal);
+
+  t.steps.forEach(addStep);
+  if (t.final?.text) { finalBox.hidden = false; drawFinal(); }
+  if (t.error) { errBox.hidden = false; errBox.textContent = t.error; }
+  if (t.note) steps.appendChild(el("div", "note", t.note));
+
+  return {
+    addStep(step) { addStep(step); scrollToEnd(); },
+    updateVoice(step, who) { voiceEls.get(step)?.[who].draw(); },
+    status(text, finished) { status.textContent = text; if (finished) { pulse.hidden = true; } },
+    note(text) { t.note = text; steps.appendChild(el("div", "note", text)); },
+    showFinal() { finalBox.hidden = false; det.open = false; drawFinal(); scrollToEnd(); },
+    updateFinal(now) { now ? drawFinal() : drawFinalT(); },
+    error(msg) { errBox.hidden = false; errBox.textContent = msg; det.open = true; },
+  };
+}
+
+function scrollToEnd() { const m = $("#main"); requestAnimationFrame(() => { m.scrollTop = m.scrollHeight; }); }
+
+/* ---------- Composer ---------- */
+const input = $("#input");
+function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + "px"; }
+input.addEventListener("input", autosize);
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && window.matchMedia("(pointer: fine)").matches) { e.preventDefault(); ask(); }
+});
+$("#sendBtn").onclick = () => running ? running.abort() : ask();
+
+function setRunning(on) {
+  const b = $("#sendBtn");
+  b.textContent = on ? "Stop" : "Ask";
+  b.classList.toggle("stop", on);
+}
+
+/* ---------- Attachments ---------- */
+let pending = []; // { name, kind: pdf|image|text, mime, data | text, size }
+const MAX_TOTAL = 15 * 1024 * 1024;
+const fileInput = $("#fileInput");
+$("#attachBtn").onclick = () => fileInput.click();
+fileInput.addEventListener("change", async () => { await addFiles([...fileInput.files]); fileInput.value = ""; });
+input.addEventListener("paste", e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } });
+const composer = document.querySelector(".composer");
+composer.addEventListener("dragover", e => e.preventDefault());
+composer.addEventListener("drop", e => { e.preventDefault(); addFiles([...(e.dataTransfer?.files || [])]); });
+
+function readAs(file, how) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r[how](file); });
+}
+// Shrink photos to at most 2000px and re-encode as JPEG: cheaper, and fits both models' limits.
+async function prepImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const scale = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.85).split(",")[1];
+  } finally { URL.revokeObjectURL(url); }
+}
+// Word and PowerPoint files are zip archives of XML; pull out the text. Charts and images inside are skipped.
+async function officeText(file) {
+  if (!window.JSZip) throw new Error("no zip");
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const names = Object.keys(zip.files)
+    .filter(n => n === "word/document.xml" || /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a, b) => (+(a.match(/\d+/) || [0])[0]) - (+(b.match(/\d+/) || [0])[0]));
+  if (!names.length) throw new Error("empty");
+  const out = [];
+  for (const n of names) {
+    const doc = new DOMParser().parseFromString(await zip.file(n).async("string"), "application/xml");
+    const paras = [...doc.getElementsByTagName("*")].filter(e => e.localName === "p");
+    const text = paras.map(p => [...p.getElementsByTagName("*")].filter(e => e.localName === "t").map(t => t.textContent).join("")).filter(Boolean).join("\n");
+    out.push(n.startsWith("ppt/") ? `[Slide ${n.match(/\d+/)[0]}]\n${text}` : text);
+  }
+  return out.join("\n\n");
+}
+async function addFiles(list) {
+  for (const f of list) {
+    const lower = f.name.toLowerCase();
+    try {
+      let item;
+      if (f.type === "application/pdf" || lower.endsWith(".pdf")) {
+        item = { name: f.name, kind: "pdf", mime: "application/pdf", data: (await readAs(f, "readAsDataURL")).split(",")[1] };
+      } else if (f.type.startsWith("image/")) {
+        item = { name: f.name, kind: "image", mime: "image/jpeg", data: await prepImage(f) };
+      } else if (/\.(docx|pptx)$/.test(lower)) {
+        item = { name: f.name, kind: "text", mime: "text/plain", text: (await officeText(f)).slice(0, 400000) };
+      } else if (/\.(txt|md|csv|json)$/.test(lower) || f.type.startsWith("text/")) {
+        item = { name: f.name, kind: "text", mime: "text/plain", text: (await readAs(f, "readAsText")).slice(0, 400000) };
+      } else {
+        showWarn(`"${f.name}" isn't a type the models can read. Save it as a PDF first (File → Save As → PDF).`); continue;
+      }
+      item.size = item.data ? item.data.length * 0.75 : item.text.length;
+      if (pending.reduce((n, x) => n + x.size, 0) + item.size > MAX_TOTAL) { showWarn("That's more than 15 MB of attachments for one question. Remove something or split it up."); continue; }
+      pending.push(item);
+    } catch { showWarn(/\.(docx|pptx)$/.test(lower) ? `Couldn't read "${f.name}". Save it as a PDF and attach that instead.` : `Couldn't open "${f.name}". If it's an iPhone photo, export it as JPEG first.`); }
+  }
+  renderChips();
+}
+function renderChips() {
+  const box = $("#chips"); box.innerHTML = ""; box.hidden = !pending.length;
+  pending.forEach((f, i) => {
+    const c = el("span", "chip"); c.appendChild(el("span", null, (f.kind === "image" ? "🖼 " : "📄 ") + f.name));
+    const x = el("button", null, "✕"); x.setAttribute("aria-label", "Remove " + f.name);
+    x.onclick = () => { pending.splice(i, 1); renderChips(); };
+    c.appendChild(x); box.appendChild(c);
+  });
+}
+
+/* ---------- Warnings and confirmations (no browser dialogs) ---------- */
+let armed = null;
+function showWarn(text) { const w = $("#warn"); w.textContent = text; w.hidden = !text; }
+input.addEventListener("input", () => { armed = null; showWarn(""); });
+
+async function ask() {
+  const q = input.value.trim();
+  if (!q || running) return;
+  if (!settings.claudeKey && settings.who !== "gemini" || !settings.geminiKey && settings.who !== "claude") { openSettings(); return; }
+  const budget = +settings.budget || 0;
+  const council = settings.who === "council";
+  if (budget && spentThisMonth() >= budget && armed !== "budget") {
+    armed = "budget"; showWarn(`You've spent about ${money(spentThisMonth())} of your $${budget} budget this month. Click Ask again to go ahead anyway.`); return;
+  }
+  if (council && settings.depth === 3 && armed !== "deep" && armed !== "budget") {
+    armed = "deep"; showWarn("Deep runs three rounds and usually costs 2 to 3 times a Standard debate. Click Ask again to run it."); return;
+  }
+  armed = null; showWarn("");
+  let c = activeConvo();
+  if (!c) {
+    c = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: q.slice(0, 80), created: Date.now(), turns: [] };
+    convos.unshift(c); activeId = c.id;
+  }
+  const files = pending; pending = []; renderChips();
+  c.turns.push({ q, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who,
+    files: files.map(f => f.name), _files: files, status: "running" });
+  input.value = ""; autosize();
+  saveConvos(); renderList();
+  running = new AbortController(); setRunning(true);
+  try { await runCouncil(c, c.turns.length - 1); }
+  finally { running = null; setRunning(false); renderList(); }
+}
+
+$("#depthSeg").addEventListener("click", e => {
+  const b = e.target.closest("button[data-depth]"); if (!b) return;
+  settings.depth = +b.dataset.depth; saveSettings(); syncOpts();
+});
+$("#whoSeg").addEventListener("click", e => {
+  const b = e.target.closest("button[data-who]"); if (!b) return;
+  settings.who = b.dataset.who; saveSettings(); syncOpts();
+});
+$("#modeSel").addEventListener("change", e => { settings.mode = e.target.value; saveSettings(); });
+$("#searchToggle").addEventListener("change", e => { settings.search = e.target.checked; saveSettings(); });
+function syncOpts() {
+  document.querySelectorAll("#depthSeg button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.depth === settings.depth)));
+  document.querySelectorAll("#whoSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.who === settings.who)));
+  $("#depthSeg").hidden = settings.who !== "council";
+  $("#modeSel").value = settings.mode;
+  $("#searchToggle").checked = settings.search;
+  input.placeholder = settings.who === "council" ? "Ask the council anything…" : `Ask ${NAMES[settings.who]} anything…`;
+}
+
+/* ---------- Downloads ---------- */
+function saveBlob(name, type, content) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = el("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "answer";
+function downloadAnswer(t) {
+  const esc = x => x.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const body = md(t.final.text).innerHTML;
+  const srcs = (t.final.sources || []).map(s => `<li><a href="${esc(s.url)}">${esc(s.title || s.url)}</a></li>`).join("");
+  const html = `<html><head><meta charset="utf-8"><title>${esc(t.q.slice(0, 80))}</title></head><body style="font-family:Georgia,serif;line-height:1.5">` +
+    `<p><b>Question:</b> ${esc(t.q)}</p><hr>${body}` + (srcs ? `<h3>Sources</h3><ol>${srcs}</ol>` : "") +
+    `<p style="color:#777;font-size:11px">Council answer, ${new Date().toLocaleDateString()}</p></body></html>`;
+  saveBlob(slug(t.q) + ".doc", "application/msword", html);
+}
+
+/* ---------- History drawer ---------- */
+function openDrawer(on) { $("#drawer").hidden = !on; $("#scrim").hidden = !on; if (on) renderList(); }
+$("#historyBtn").onclick = () => openDrawer(true);
+$("#scrim").onclick = () => { openDrawer(false); closeSettings(); };
+function newConvo() { if (running) return; activeId = null; saveConvos(); renderThread(); openDrawer(false); input.focus(); }
+$("#newBtn").onclick = newConvo;
+$("#drawerNew").onclick = newConvo;
+function renderList() {
+  const list = $("#convoList"); list.innerHTML = "";
+  if (!convos.length) { list.appendChild(el("div", "note", "Nothing yet. Your questions will show up here.")); return; }
+  convos.forEach(c => {
+    const row = el("div", "item" + (c.id === activeId ? " active" : ""));
+    const open = el("button", "open", c.title); open.title = c.title;
+    open.onclick = () => { if (running) return; activeId = c.id; saveConvos(); renderThread(); openDrawer(false); };
+    const del = el("button", "del", "✕"); del.setAttribute("aria-label", "Delete " + c.title);
+    del.onclick = () => {
+      if (running && c.id === activeId) return;
+      if (del.dataset.armed) { convos = convos.filter(x => x.id !== c.id); if (activeId === c.id) { activeId = null; renderThread(); } saveConvos(); renderList(); }
+      else { del.dataset.armed = "1"; del.textContent = "Delete?"; setTimeout(() => { delete del.dataset.armed; del.textContent = "✕"; }, 2500); }
+    };
+    row.append(open, del); list.appendChild(row);
+  });
+}
+
+/* ---------- Settings ---------- */
+function openSettings() {
+  $("#claudeKey").value = settings.claudeKey; $("#geminiKey").value = settings.geminiKey;
+  $("#geminiModel").value = settings.geminiModel; $("#effort").value = settings.effort; $("#judge").value = settings.judge;
+  $("#about").value = settings.about; $("#budget").value = settings.budget;
+  $("#settings").hidden = false; $("#scrim").hidden = false; $("#claudeKey").focus();
+}
+function closeSettings() { $("#settings").hidden = true; if ($("#drawer").hidden) $("#scrim").hidden = true; }
+$("#settingsBtn").onclick = openSettings;
+$("#settingsCancel").onclick = closeSettings;
+$("#settingsSave").onclick = () => {
+  settings.claudeKey = $("#claudeKey").value.trim(); settings.geminiKey = $("#geminiKey").value.trim();
+  settings.geminiModel = $("#geminiModel").value; settings.effort = $("#effort").value; settings.judge = $("#judge").value;
+  settings.about = $("#about").value.trim(); settings.budget = Math.max(0, +$("#budget").value || 0);
+  saveSettings(); closeSettings(); renderSpend(); if (!activeConvo()) renderThread();
+};
+$("#clearAll").onclick = e => {
+  const b = e.currentTarget;
+  if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Click again to delete everything"; return; }
+  convos = []; activeId = null; saveConvos(); renderThread(); renderList();
+  delete b.dataset.armed; b.textContent = "Delete all history"; closeSettings();
+};
+$("#exportBtn").onclick = () => {
+  saveBlob(`council-backup-${new Date().toISOString().slice(0, 10)}.json`, "application/json",
+    JSON.stringify({ app: "council", version: 1, exported: new Date().toISOString(), convos, spend: ledger }, noPrivate, 2));
+};
+$("#importInput").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  const hint = $("#backupHint");
+  try {
+    const data = JSON.parse(await readAs(f, "readAsText"));
+    if (data.app !== "council" || !Array.isArray(data.convos)) throw new Error();
+    const have = new Set(convos.map(c => c.id));
+    const added = data.convos.filter(c => c && c.id && Array.isArray(c.turns) && !have.has(c.id));
+    convos = convos.concat(added).sort((a, b) => (b.created || 0) - (a.created || 0));
+    for (const [m, v] of Object.entries(data.spend || {})) if (typeof v === "number") ledger[m] = Math.max(ledger[m] || 0, v);
+    store.set("council.spend", ledger); saveConvos(); renderList(); renderSpend();
+    hint.textContent = `Restored ${added.length} conversation${added.length === 1 ? "" : "s"}.`;
+  } catch { hint.textContent = "That file isn't a Council backup."; }
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeSettings(); openDrawer(false); } });
+
+syncOpts();
+renderSpend();
+renderThread();
+if (!settings.claudeKey || !settings.geminiKey) setTimeout(openSettings, 300);
+</script>
+</body>
+</html>
