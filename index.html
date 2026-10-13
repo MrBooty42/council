@@ -396,8 +396,8 @@ const GEMINI_ECONOMY = "gemini-3.8-flash";
 const geminiFor = tier => (tier === "max" ? settings.geminiModel : GEMINI_ECONOMY);
 const GEMINI_LABELS = { "gemini-4-argon": "Gemini 4 Argon", "gemini-3.1-pro-preview": "Gemini 3.1 Pro", "gemini-3.8-flash": "Gemini 3.8 Flash" };
 const PRICES = {
-  "claude-opus-5-5": { in: 4, out: 20 },
-  "claude-sonnet-5-5": { in: 2, out: 10 },
+  "claude-opus-5-5": { in: 4, out: 20, cacheRead: 0.2 },
+  "claude-sonnet-5-5": { in: 2, out: 10, cacheRead: 0.2 },
   "claude-haiku-5-5": { in: 0.1, out: 0.5 },
   "gemini-4-argon": { in: 2, out: 10 },
   "gemini-3.1-pro-preview": { in: 2, out: 12 },
@@ -446,7 +446,9 @@ async function readError(res, who) {
 }
 
 /* ---------- Claude ---------- */
-function claudeContent(prompt, files) {
+// cache: mark the end of the attachments so the next step re-reads them from Anthropic's cache
+// (about 5% of the normal input price on Opus) instead of paying full price again.
+function claudeContent(prompt, files, cache) {
   if (!files || !files.length) return prompt;
   const parts = [];
   for (const f of files) {
@@ -454,13 +456,14 @@ function claudeContent(prompt, files) {
     else if (f.kind === "image") parts.push({ type: "image", source: { type: "base64", media_type: f.mime, data: f.data } });
     else parts.push({ type: "text", text: `Attached file "${f.name}":\n${f.text}` });
   }
+  if (cache) parts[parts.length - 1].cache_control = { type: "ephemeral" };
   parts.push({ type: "text", text: prompt });
   return parts;
 }
-async function callClaude({ system, prompt, search, onText, signal, files, tier }) {
+async function callClaude({ system, prompt, search, onText, signal, files, tier, cache }) {
   tier = tier || TIERS.max;
-  const messages = [{ role: "user", content: claudeContent(prompt, files) }];
-  const usage = { in: 0, out: 0, searches: 0 };
+  const messages = [{ role: "user", content: claudeContent(prompt, files, cache) }];
+  const usage = { in: 0, out: 0, searches: 0, cacheWrite: 0, cacheRead: 0 };
   const sources = [];
   let text = "";
   for (let hop = 0; hop < 4; hop++) {
@@ -493,7 +496,10 @@ async function callClaude({ system, prompt, search, onText, signal, files, tier 
     for await (const ev of readSSE(res, signal)) {
       let d; try { d = JSON.parse(ev.data); } catch { continue; }
       if (d.type === "error") throw new Error("Claude: " + (d.error?.message || "stream error"));
-      if (d.type === "message_start") usage.in += d.message?.usage?.input_tokens || 0;
+      if (d.type === "message_start") {
+        const u = d.message?.usage || {};
+        usage.in += u.input_tokens || 0; usage.cacheWrite += u.cache_creation_input_tokens || 0; usage.cacheRead += u.cache_read_input_tokens || 0;
+      }
       else if (d.type === "content_block_start") {
         const b = JSON.parse(JSON.stringify(d.content_block));
         blocks[d.index] = b;
@@ -523,7 +529,8 @@ async function callClaude({ system, prompt, search, onText, signal, files, tier 
     break;
   }
   const pr = PRICES[tier.model];
-  const cost = (usage.in * pr.in + usage.out * pr.out) / 1e6 + usage.searches * CLAUDE_SEARCH_PRICE;
+  const cost = (usage.in * pr.in + usage.cacheWrite * pr.in * 1.25 + usage.cacheRead * (pr.cacheRead ?? pr.in) + usage.out * pr.out) / 1e6
+    + usage.searches * CLAUDE_SEARCH_PRICE;
   return { text: text.trim(), sources, cost };
 }
 
@@ -612,7 +619,7 @@ const P = {
   revise: (ctx, q, mine, critique, theirs, other) => `${ctx}Drew's question:\n${q}\n\nYour current answer:\n<<<\n${mine}\n>>>\n\n${other}'s review of your answer:\n<<<\n${critique}\n>>>\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nFirst, under "## Response to review", go through the points briefly: accept what is right without defending your old wording, and push back only where you have a real reason. Then write your complete improved answer under "## Revised answer", taking anything better from ${other}'s answer. On the very last line write exactly one of these and nothing else:\nSTANCE: AGREE (you would sign ${other}'s answer as it stands)\nSTANCE: MOSTLY AGREE\nSTANCE: DISAGREE`,
   solo: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nThis time you are answering alone, without your partner, so check your own work: verify claims that matter and say where you are unsure.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nKeep links to the sources behind the key claims.`,
   // Create: the models split one piece of work instead of each doing all of it.
-  pitch: (ctx, q) => `${ctx}Drew wants the council to make this:\n${q}\n\nPropose how to build it. Your partner is proposing separately; then one plan will be made that takes the better idea for each part, and the parts get split between you to write. Keep it short (under 250 words) and do not write the content yet:\n- A numbered list of 3 to 8 parts. For each: a title and one or two lines on what goes in it and how you would approach it.\n- One line on format and tone (who it is for, how long, how it should read).\nIf the task is unclear, assume the most useful reading and say so in one line.`,
+  pitch: (ctx, q) => `${ctx}Drew wants the council to make this:\n${q}\n\nPropose how to build it. Your partner is proposing separately; then one plan will be made that takes the better idea for each part, and the parts get split between you to write. Keep it short (under 250 words) and do not write the content yet:\n- A numbered list of 3 to 8 parts. For each: a title and one or two lines on what goes in it and how you would approach it.\n- One line on format and tone (who it is for, how long, how it should read).\nDo not search the web in this step.\nIf the task is unclear, assume the most useful reading and say so in one line.`,
   plan: (ctx, q, a, b) => `${ctx}Drew wants the council to make this:\n${q}\n\nClaude's proposal:\n<<<\n${a}\n>>>\n\nGemini's proposal:\n<<<\n${b}\n>>>\n\nMake the plan. For each part, take the better idea from the two proposals or combine them; judge the ideas, not who wrote them. Then assign each part to one writer, usually the model whose idea won that part. Where it is a tie, Gemini takes parts that depend most on current facts, prices or local data (it has strong Google Search), and Claude takes parts that are mostly reasoning, structure or explanation. Do not give one model everything unless its ideas were clearly better throughout. 3 to 8 parts, in reading order.\n\nReply with only this JSON and nothing else:\n{"title": "document title", "style": "one or two lines on format, tone and length that both writers must follow", "parts": [{"n": 1, "title": "part title", "writer": "claude or gemini", "brief": "what this part must cover and how", "why": "a few words on whose idea and why"}]}`,
   build: (ctx, q, plan, mine, other) => `${ctx}Drew wants the council to make this:\n${q}\n\nThe council's plan:\n${planText(plan)}\n\n` +
     (mine.length === plan.parts.length ? `You are writing every part.` : `You are writing part${mine.length > 1 ? "s" : ""} ${mine.join(", ")}. ${other} is writing the other parts at the same time, so do not write those and do not repeat what they cover.`) +
@@ -723,7 +730,18 @@ async function runCouncil(convo, turnIndex) {
 
   const view = renderTurn(convo, turnIndex, true);
 
+  // Short steps (reviews, pitches, plans) think one level less than the answer-writing steps.
+  // Steps that carry attachments all use the same effort and search setting, because changing
+  // either one makes Claude re-read the files at full price instead of from cache.
+  const LIGHT = new Set(["pitch", "plan", "critique"]);
+  const LOWER = { high: "medium", medium: "low", low: "low" };
+  let fileSearch = 0;
+  const tierFor = (kind, files) => {
+    const t = TIERS[turn.claudeTier];
+    return files?.length || !LIGHT.has(kind) ? t : { ...t, effort: LOWER[t.effort] || t.effort };
+  };
   async function pairStep(label, kind, makePrompt, useSearch, files, whos = ["claude", "gemini"]) {
+    if (files?.length) useSearch = fileSearch;
     const step = { label, kind, claude: { text: "" }, gemini: { text: "" } };
     if (whos.length < 2) step.whos = whos;
     turn.steps.push(step);
@@ -731,7 +749,8 @@ async function runCouncil(convo, turnIndex) {
     const runOne = async who => {
       try {
         const r = await call(who, {
-          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files, tier: TIERS[turn.claudeTier], gmodel: turn.geminiModel,
+          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files, tier: tierFor(kind, files), gmodel: turn.geminiModel,
+          cache: !!files?.length,
           onText: t => { step[who].text = t; view.updateVoice(step, who); },
         });
         step[who].text = r.text; step[who].sources = r.sources; step[who].cost = r.cost; turn.cost += r.cost; turn.costBy[who] += r.cost;
@@ -757,6 +776,8 @@ async function runCouncil(convo, turnIndex) {
   async function buildTogether(files) {
     const deep = turn.depth === 3;
     const F = turn.format === "slides" ? SLIDES_RULE : "";
+    const buildSearch = turn.search ? (deep ? 5 : 3) : 0;
+    fileSearch = buildSearch;
     view.status("Both models are pitching how to build it");
     const pitch = await pairStep("Ideas", "pitch", () => P.pitch(ctx, q) + F, 0, files);
     const planner = turn.judge;
@@ -773,7 +794,7 @@ async function runCouncil(convo, turnIndex) {
     const partsOf = w => plan.parts.filter(p => p.writer === w).map(p => p.n);
     const writers = ["claude", "gemini"].filter(w => partsOf(w).length);
     view.status(writers.length > 1 ? "Both models are writing their parts" : `${NAMES[writers[0]]} is writing`);
-    const built = await pairStep("Writing", "build", w => P.build(ctx, q, plan, partsOf(w), NAMES[OTHER[w]]) + F, turn.search ? (deep ? 5 : 3) : 0, files, writers);
+    const built = await pairStep("Writing", "build", w => P.build(ctx, q, plan, partsOf(w), NAMES[OTHER[w]]) + F, buildSearch, files, writers);
     const content = {};
     for (const w of writers) Object.assign(content, splitParts(built[w], partsOf(w)));
     const textOf = w => partsOf(w).filter(n => content[n]).map(n => `@@PART ${n}@@\n${content[n]}`).join("\n\n");
@@ -828,6 +849,7 @@ async function runCouncil(convo, turnIndex) {
       return;
     }
     if (turn.task === "create") { await buildTogether(files); return; }
+    fileSearch = S.opening;
     view.status("Opening statements: both models are answering");
     // Files go to the opening and critique steps, where facts get stated and checked.
     let ans = await pairStep("Opening statements", "opening", () => P.opening(ctx, q), S.opening, files);
