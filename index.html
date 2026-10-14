@@ -571,8 +571,10 @@ async function callGemini({ system, prompt, search, onText, signal, files, gmode
   const body = {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts }],
-    generationConfig: { maxOutputTokens: 32768, thinkingConfig: { thinkingLevel: tier?.effort === "low" ? "low" : "high" } },
+    generationConfig: { maxOutputTokens: 32768 },
   };
+  // Thinking tokens are most of Gemini's bill. Economy questions think briefly; Max lets the model decide.
+  if (!tier || tier.model !== TIERS.max.model || tier.effort === "low") body.generationConfig.thinkingConfig = { thinkingLevel: "low" };
   if (search > 0) body.tools = [{ google_search: {} }];
   let res;
   for (let attempt = 0; attempt < 3; attempt++) {
