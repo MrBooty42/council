@@ -261,7 +261,7 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
           </select>
         </label>
         <span class="seg" id="whoSeg" role="group" aria-label="Who answers">
-          <button data-who="council" aria-pressed="true" title="Claude answers and Gemini fact-checks when facts matter">Both</button>
+          <button data-who="council" aria-pressed="true" title="Both models work on it: one leads, the other checks or solves separately">Both</button>
           <button data-who="claude" aria-pressed="false" title="Claude answers alone, much cheaper">Claude</button>
           <button data-who="gemini" aria-pressed="false" title="Gemini answers alone, much cheaper">Gemini</button>
         </span>
@@ -300,12 +300,13 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
     </div>
     <div class="row2">
       <div class="field">
-        <label for="geminiModel">Gemini model for Max power</label>
+        <label for="geminiModel">Gemini model</label>
         <select id="geminiModel">
           <option value="gemini-4-argon">Gemini 4 Argon (strongest)</option>
           <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
           <option value="gemini-3.8-flash">Gemini 3.8 Flash (cheap, free tier)</option>
         </select>
+        <span class="hint">Used on every question. Argon costs a fraction of Claude, so Economy only downgrades Claude.</span>
       </div>
     </div>
     <div class="field">
@@ -320,12 +321,13 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
       <span class="hint">The app warns you before going over it.</span>
     </div>
     <div class="field">
-      <label for="judge">Who writes the final answer</label>
+      <label for="judge">Who leads</label>
       <select id="judge">
-        <option value="claude">Claude</option>
-        <option value="gemini">Gemini</option>
+        <option value="auto">Auto: whichever suits the question</option>
+        <option value="claude">Always Claude</option>
+        <option value="gemini">Always Gemini</option>
       </select>
-      <span class="hint">That model merges both sides fairly and lists anything still unresolved.</span>
+      <span class="hint">The lead writes the answer and the other checks it. Auto gives Gemini search-heavy, current, local and photo or long-file questions, and Claude reasoning, writing and advice.</span>
     </div>
     </div>
     <div class="row2" id="googleFields">
@@ -374,8 +376,10 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", power: "auto", judge: "claude", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council", task: "ask", format: "doc", googleClientId: "", googleApiKey: "", driveAuto: false, myFiles: true, deliver: "google" };
+const DEFAULT_SETTINGS = { claudeKey: "", geminiKey: "", geminiModel: "gemini-4-argon", power: "auto", judge: "auto", depth: 2, search: true, about: "I'm 19 and study business at the University of Missouri–Columbia. I own a mobile car detailing business in Kansas City. I'm very interested in AI. I use this council to study, research, handle complex tasks, and grow my business and other entrepreneurial projects.", budget: 15, mode: "general", who: "council", task: "ask", format: "doc", googleClientId: "", googleApiKey: "", driveAuto: false, myFiles: true, deliver: "google" };
 let settings = Object.assign({}, DEFAULT_SETTINGS, store.get("council.settings", {}));
+// v12: "Who writes the final answer" became "Who leads" with Auto. The old default was Claude, so move it to Auto once.
+if (!settings.leadV) { if (settings.judge === "claude") settings.judge = "auto"; settings.leadV = 1; }
 let convos = store.get("council.convos", []);
 let activeId = store.get("council.active", null);
 const saveSettings = () => store.set("council.settings", settings);
@@ -413,7 +417,8 @@ const TIERS = {
 };
 const ROUTER_MODEL = "claude-haiku-5-5";
 const GEMINI_ECONOMY = "gemini-3.8-flash";
-const geminiFor = tier => (tier === "max" ? settings.geminiModel : GEMINI_ECONOMY);
+// Gemini costs a fraction of Claude, so it always runs the model chosen in Settings; Economy only downgrades Claude.
+const geminiFor = () => settings.geminiModel || GEMINI_ECONOMY;
 const GEMINI_LABELS = { "gemini-4-argon": "Gemini 4 Argon", "gemini-3.1-pro-preview": "Gemini 3.1 Pro", "gemini-3.8-flash": "Gemini 3.8 Flash" };
 const PRICES = {
   "claude-opus-5-5": { in: 4, out: 20, cacheRead: 0.2 },
@@ -555,7 +560,7 @@ async function callClaude({ system, prompt, search, onText, signal, files, tier,
 }
 
 /* ---------- Gemini ---------- */
-async function callGemini({ system, prompt, search, onText, signal, files, gmodel }) {
+async function callGemini({ system, prompt, search, onText, signal, files, gmodel, tier }) {
   const model = gmodel || settings.geminiModel;
   const parts = [];
   for (const f of files || []) {
@@ -566,7 +571,7 @@ async function callGemini({ system, prompt, search, onText, signal, files, gmode
   const body = {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: "user", parts }],
-    generationConfig: { maxOutputTokens: 32768 },
+    generationConfig: { maxOutputTokens: 32768, thinkingConfig: { thinkingLevel: tier?.effort === "low" ? "low" : "high" } },
   };
   if (search > 0) body.tools = [{ google_search: {} }];
   let res;
@@ -576,6 +581,11 @@ async function callGemini({ system, prompt, search, onText, signal, files, gmode
       headers: { "content-type": "application/json", "x-goog-api-key": settings.geminiKey },
       body: JSON.stringify(body),
     });
+    if (res.status === 400 && body.generationConfig.thinkingConfig) {
+      // A model that doesn't take a thinking level gets its own default instead of failing.
+      const t = await res.clone().text().catch(() => "");
+      if (/thinking/i.test(t)) { delete body.generationConfig.thinkingConfig; attempt--; continue; }
+    }
     if (res.status !== 500 && res.status !== 503) break;
     await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
   }
@@ -640,9 +650,14 @@ const P = {
   draft: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nWrite the best answer you can. Your partner will fact-check it afterwards with web search, so think it through properly, commit to clear positions, and link the sources behind the key facts.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.`,
   factcheck: (ctx, q, answer, writer) => `${ctx}Drew's question:\n${q}\n\n${writer}'s answer:\n<<<\n${answer}\n>>>\n\nYou are the fact-checker, not a second author. Do not rewrite the answer or add your own take. Check the facts it rests on: numbers, prices, dates, names, rules and laws, claims about products, companies or research, and whether each linked source is real, reliable and actually says what the answer claims. Search to verify anything that matters and is not common knowledge. Also flag a major reasoning error or an important missing fact if you are confident it changes what Drew should do.\n\nList only problems that matter, most important first. For each: the claim, what is wrong, the correct information, and the source. Skip style, wording and minor points. If everything that matters checks out, say so in one line.\n\nOn the very last line write exactly one of these and nothing else:\nVERDICT: NO MAJOR ISSUES\nVERDICT: ISSUES FOUND`,
   fixup: (ctx, q, answer, check, checker) => `${ctx}Drew's question:\n${q}\n\nYour answer:\n<<<\n${answer}\n>>>\n\n${checker}'s fact-check of it:\n<<<\n${check}\n>>>\n\nWrite the final answer for Drew. Fix every point where the fact-check is right. Where you are confident it is wrong, keep your version, and list those points under "## Where the council disagrees" with one sentence for each side and which you would bet on. Leave that section out if you accepted everything. Keep the same format: direct answer first, then the full answer, then "## Confidence". Do not mention the fact-check or describe this process.`,
+  // Solve: both work the problem separately; if they disagree, the lead compares the two solutions blind.
+  solve: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nSolve this yourself, carefully. Another AI is solving it separately and the two solutions will be compared, so do not hedge between answers: work it through step by step, check your work, and commit to one answer.\n\nFormat:\n- Start with the final answer in the first sentence or two.\n- Then the working or reasoning, as clearly as a good tutor would show it.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.`,
+  same: (q, a, b) => `Two AIs answered the same question separately. Do they reach the same final answer or conclusion? Ignore wording, formatting, rounding and the method used; only the substance of the final answer matters.\n\nReply with only this JSON: {"same": true} or {"same": false, "diff": "a few words on how they differ"}\n\nQuestion: ${q.slice(0, 2000)}\n\nAnswer A:\n${a.slice(0, 6000)}\n\nAnswer B:\n${b.slice(0, 6000)}`,
+  reconcile: (ctx, q, a, b) => `${ctx}Drew's question:\n${q}\n\nTwo solutions were worked out separately and they disagree. You don't know who wrote which, and one of them may be your own; judge only the reasoning.\n\nSolution A:\n<<<\n${a}\n>>>\n\nSolution B:\n<<<\n${b}\n>>>\n\nFind the exact step where they part ways and work out which is right; redo that part yourself if needed. Then write the final answer for Drew: the correct answer first, then the clean working. If it truly can't be settled, say so and add "## Where the council disagrees" with one sentence for each side and which you would bet on. End with "## Confidence". Do not mention Solution A or B or that there were two solutions.`,
   // Create: the models split one piece of work instead of each doing all of it.
   pitch: (ctx, q) => `${ctx}Drew wants the council to make this:\n${q}\n\nPropose how to build it. Your partner is proposing separately; then one plan will be made that takes the better idea for each part, and the parts get split between you to write. Keep it short (under 250 words) and do not write the content yet:\n- A numbered list of 3 to 8 parts. For each: a title and one or two lines on what goes in it and how you would approach it.\n- One line on format and tone (who it is for, how long, how it should read).\nDo not search the web in this step.\nIf the task is unclear, assume the most useful reading and say so in one line.`,
-  plan: (ctx, q, a, b) => `${ctx}Drew wants the council to make this:\n${q}\n\nClaude's proposal:\n<<<\n${a}\n>>>\n\nGemini's proposal:\n<<<\n${b}\n>>>\n\nMake the plan. For each part, take the better idea from the two proposals or combine them; judge the ideas, not who wrote them. Then assign each part to one writer, usually the model whose idea won that part. Where it is a tie, Gemini takes parts that depend most on current facts, prices or local data (it has strong Google Search), and Claude takes parts that are mostly reasoning, structure or explanation. Do not give one model everything unless its ideas were clearly better throughout. 3 to 8 parts, in reading order.\n\nReply with only this JSON and nothing else:\n{"title": "document title", "style": "one or two lines on format, tone and length that both writers must follow", "parts": [{"n": 1, "title": "part title", "writer": "claude or gemini", "brief": "what this part must cover and how", "why": "a few words on whose idea and why"}]}`,
+  // The planner sees the proposals as A and B, in random order, so it judges ideas rather than authors.
+  plan: (ctx, q, a, b) => `${ctx}Drew wants the council to make this:\n${q}\n\nProposal A:\n<<<\n${a}\n>>>\n\nProposal B:\n<<<\n${b}\n>>>\n\nThe proposals come from two different AIs; you are not told which is which, and one may be your own. Make the plan. For each part, take the better idea from the two proposals or combine them. Then assign each part to one writer, A or B, usually the author of the idea that won that part. Where it is a tie, split the parts evenly. Do not give one writer everything unless its ideas were clearly better throughout. 3 to 8 parts, in reading order.\n\nReply with only this JSON and nothing else:\n{"title": "document title", "style": "one or two lines on format, tone and length that both writers must follow", "parts": [{"n": 1, "title": "part title", "writer": "A or B", "brief": "what this part must cover and how", "why": "a few words on whose idea and why"}]}`,
   build: (ctx, q, plan, mine, other) => `${ctx}Drew wants the council to make this:\n${q}\n\nThe council's plan:\n${planText(plan)}\n\n` +
     (mine.length === plan.parts.length ? `You are writing every part.` : `You are writing part${mine.length > 1 ? "s" : ""} ${mine.join(", ")}. ${other} is writing the other parts at the same time, so do not write those and do not repeat what they cover.`) +
     ` Write the finished content Drew can use as is, following the style line. Start each of your parts with a line containing only @@PART n@@ (n is the part number), then the part's heading as "## title". No preamble, no closing remarks, nothing outside your parts.`,
@@ -656,12 +671,18 @@ function planText(plan) {
   return `Title: ${plan.title}\nStyle: ${plan.style}\n` + plan.parts.map(p => `${p.n}. ${p.title} (written by ${NAMES[p.writer]}): ${p.brief}`).join("\n");
 }
 // Plans come back as JSON; anything unreadable becomes a one-part plan so the work still gets done.
-function parsePlan(text, fallbackWriter, q) {
+// blind maps the planner's "A"/"B" labels back to models.
+function unblind(text, blind) {
+  if (!blind) return text;
+  return text.replace(/\b(?:[Pp]roposal |[Ii]dea |[Ww]riter )([AB])\b|\b([AB])(?='s\b| (?:idea|proposal|wins|won|had|was|is|has|covers|gives)\b)/g,
+    (m, x, y) => x ? NAMES[blind[x]] : m.replace(y, NAMES[blind[y]]));
+}
+function parsePlan(text, fallbackWriter, q, blind) {
   try {
     const j = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
     const parts = (j.parts || []).filter(p => p && p.title).slice(0, 8).map((p, i) => ({
-      n: i + 1, title: String(p.title), brief: String(p.brief || ""), why: String(p.why || ""),
-      writer: p.writer === "claude" || p.writer === "gemini" ? p.writer : fallbackWriter,
+      n: i + 1, title: String(p.title), brief: unblind(String(p.brief || ""), blind), why: unblind(String(p.why || ""), blind),
+      writer: blind?.[String(p.writer).trim().toUpperCase()] || (p.writer === "claude" || p.writer === "gemini" ? p.writer : fallbackWriter),
     }));
     if (parts.length) return { title: String(j.title || q.slice(0, 80)), style: String(j.style || ""), parts };
   } catch {}
@@ -710,17 +731,23 @@ function call(who, opts) { return who === "claude" ? callClaude(opts) : callGemi
 async function pickTier(turn, signal) {
   const council = turn.who === "council" && turn.task !== "create";
   const auto = turn.power === "auto";
-  if (!auto && !council) return { tier: turn.power, check: true, cost: 0 };
-  if (!settings.claudeKey) return { tier: auto ? "economy" : turn.power, check: true, cost: 0 };
-  const prompt = `Read this question and reply with exactly two words.
+  const fallbackLead = turn.judge === "gemini" ? "gemini" : "claude";
+  if (!auto && !council && !(turn.who === "council" && turn.judge === "auto")) return { tier: turn.power, check: "check", lead: fallbackLead, cost: 0 };
+  if (!settings.claudeKey) return { tier: auto ? "economy" : turn.power, check: "check", lead: fallbackLead, cost: 0 };
+  const prompt = `Read this question and reply with exactly three words.
 
 First word, how much reasoning power it needs:
 HEAVY: hard multi-step reasoning, advanced math, science or technical work, rigorous research across many sources, long or several attached documents, or high-stakes choices (large sums of money, legal, medical, signing contracts, major life decisions).
 LIGHT: everything else, including everyday facts, explanations, writing help, quick business questions and summaries of a short file.
 
-Second word, whether a second AI fact-checking the answer with web search would make it better:
-CHECK: the answer rests on facts that can be wrong or out of date: prices, statistics, laws and rules, recent events, product or company details, research findings, citations, or a decision that depends on such facts.
-SOLO: the answer rests on reasoning or writing, not checkable facts: math, logic, coding, explaining a concept, brainstorming, editing or writing text, opinions and advice from first principles.
+Second word, how a second AI helps most:
+CHECK: the answer rests on facts that can be wrong or out of date: prices, statistics, laws and rules, recent events, product or company details, research findings, citations, or a decision that depends on such facts. One AI answers and the other fact-checks it.
+SOLVE: the question has one right answer reached by reasoning: math, logic, a calculation, a technical or coding problem, a tricky exam question. Both AIs solve it separately and their answers are compared.
+SOLO: writing, editing, brainstorming, explaining a concept, opinions and advice from first principles, or anything simple. One AI answers alone.
+
+Third word, which AI should lead (write the answer):
+GEMINI: the answer mostly comes from fresh web search (news, current prices, local places and businesses, product or company lookups, recent research), or the question is about photos, video, audio, or long or several attached documents.
+CLAUDE: everything else, especially reasoning, careful writing, strategy, advice, explanations and analysis.
 
 Mode: ${turn.mode}. Attached files: ${turn.files?.length || 0}.${turn.task === "create" ? "\nThis is a request to make something (a document, guide or plan). Length alone does not make it HEAVY; judge by how hard the content is to get right." : ""}
 Question: ${turn.q.slice(0, 4000)}`;
@@ -728,17 +755,18 @@ Question: ${turn.q.slice(0, 4000)}`;
     const res = await safeFetch("https://api.anthropic.com/v1/messages", {
       method: "POST", signal,
       headers: { "content-type": "application/json", "x-api-key": settings.claudeKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: ROUTER_MODEL, max_tokens: 10, thinking: { type: "disabled" }, output_config: { effort: "low" }, messages: [{ role: "user", content: prompt }] }),
+      body: JSON.stringify({ model: ROUTER_MODEL, max_tokens: 16, thinking: { type: "disabled" }, output_config: { effort: "low" }, messages: [{ role: "user", content: prompt }] }),
     });
     if (!res.ok) throw await readError(res, "Claude");
     const j = await res.json();
     const word = (j.content || []).map(b => b.text || "").join("").toUpperCase();
     const cost = ((j.usage?.input_tokens || 0) * PRICES[ROUTER_MODEL].in + (j.usage?.output_tokens || 0) * PRICES[ROUTER_MODEL].out) / 1e6;
-    return { tier: auto ? (word.includes("HEAVY") ? "max" : "economy") : turn.power, check: !word.includes("SOLO"), cost };
+    const check = word.includes("SOLVE") ? "solve" : word.includes("SOLO") ? "solo" : "check";
+    return { tier: auto ? (word.includes("HEAVY") ? "max" : "economy") : turn.power, check, lead: /\bGEMINI\b/.test(word) ? "gemini" : "claude", cost };
   } catch (e) {
     if (e.name === "AbortError") throw e;
     if (e.status === 401 || e.status === 403) throw e;
-    return { tier: auto ? "economy" : turn.power, check: true, cost: 0 };
+    return { tier: auto ? "economy" : turn.power, check: "check", lead: fallbackLead, cost: 0 };
   }
 }
 
@@ -957,10 +985,12 @@ async function runCouncil(convo, turnIndex) {
     fileSearch = buildSearch;
     view.status("Both models are pitching how to build it");
     const pitch = await pairStep("Ideas", "pitch", () => P.pitch(ctx, q) + F, 0, files);
-    const planner = turn.judge;
-    view.status(`${NAMES[planner]} is picking the best idea for each part`);
-    const planOut = await pairStep("Plan", "plan", () => P.plan(ctx, q, pitch.claude, pitch.gemini) + F, 0, [], [planner]);
-    let plan = parsePlan(planOut[planner], planner, q);
+    const planner = turn.lead;
+    const order = Math.random() < 0.5 ? ["claude", "gemini"] : ["gemini", "claude"];
+    const blind = { A: order[0], B: order[1] };
+    view.status(`${NAMES[planner]} is picking the best idea for each part, without knowing whose is whose`);
+    const planOut = await pairStep("Plan", "plan", () => P.plan(ctx, q, pitch[order[0]], pitch[order[1]]) + F, 0, [], [planner]);
+    let plan = parsePlan(planOut[planner], planner, q, blind);
     const planStep = turn.steps.at(-1);
     if (!plan) {
       plan = { title: q.slice(0, 80), style: "", parts: [{ n: 1, title: "The full piece", writer: planner, brief: "Everything the task asks for.", why: "plan was unreadable" }] };
@@ -1007,7 +1037,9 @@ async function runCouncil(convo, turnIndex) {
     view.status("Choosing how much power this question needs");
     const pick = await pickTier(turn, signal);
     turn.claudeTier = pick.tier; turn.geminiModel = geminiFor(pick.tier);
-    if (turn.who === "council" && turn.task !== "create") turn.checkPlan = turn.depth === 3 || pick.check ? "check" : "solo";
+    turn.route = pick.check;
+    turn.lead = turn.judge === "claude" || turn.judge === "gemini" ? turn.judge : pick.lead || "claude";
+    if (turn.who === "council" && turn.task !== "create") turn.checkPlan = pick.check === "solo" && turn.depth === 3 ? "check" : pick.check === "solve" && turn.depth === 1 ? "solo" : pick.check || "check";
     turn.cost += pick.cost; turn.costBy.claude += pick.cost;
     view.tier();
     if (turn._sources) await findMyFiles(turn, files, view, signal);
@@ -1028,7 +1060,7 @@ async function runCouncil(convo, turnIndex) {
       return;
     }
     if (turn.task === "create") { await buildTogether(files); return; }
-    const writer = turn.judge || "claude", checker = OTHER[writer];
+    const writer = turn.lead, checker = OTHER[writer];
     const all = () => { const out = []; for (const st of turn.steps) for (const w of ["claude", "gemini"]) for (const src of st[w].sources || []) out.push(src); return dedupe(out); };
     const finish = (text, by) => {
       turn.final = { text, by, sources: citedFirst(text, all()) };
@@ -1050,11 +1082,35 @@ async function runCouncil(convo, turnIndex) {
       turn.final = { text: r.text, by: writer, sources: citedFirst(r.text, dedupe(r.sources)) };
       turn.status = "done";
       view.updateFinal(true);
-      view.status(`Answered by ${NAMES[writer]}; skipped the fact-check because this question is about reasoning, not facts`, true);
+      view.status(`Answered by ${NAMES[writer]}; ${turn.route === "solve" ? "Quick solves it with one model" : "no check needed for writing or advice"}`, true);
+      return;
+    }
+    if (turn.checkPlan === "solve") {
+      // One right answer: two independent solutions catch more mistakes than one model checking itself.
+      view.status("Both models are solving it separately");
+      const sol = await pairStep("Solutions", "opening", () => P.solve(ctx, q), turn.search ? 2 : 0, files, ["claude", "gemini"], { fullEffort: true });
+      const [a, b] = Math.random() < 0.5 ? [sol.claude, sol.gemini] : [sol.gemini, sol.claude];
+      view.status("Comparing the two answers");
+      const cmp = await cheapJSON(P.same(q, a, b), signal, 100).catch(e => { if (e.name === "AbortError") throw e; return { json: null, cost: 0 }; });
+      turn.cost += cmp.cost; turn.costBy.claude += cmp.cost;
+      if (cmp.json?.same === true) {
+        turn.checkResult = "agree";
+        view.note("Both models solved it separately and reached the same answer.");
+        finish(sol[writer], writer);
+        view.status("Done: both models reached the same answer on their own", true);
+        return;
+      }
+      turn.checkResult = "reconciled";
+      if (cmp.json?.diff) view.note(`The two solutions differed: ${String(cmp.json.diff).slice(0, 200)}.`);
+      view.status(`${NAMES[writer]} is working out which solution is right, without knowing whose is whose`);
+      const final = (await pairStep("Reconcile", "revise", () => P.reconcile(ctx, q, a, b), 0, [], [writer], { fullEffort: true }))[writer];
+      finish(final, writer);
+      view.status(`Done: the solutions differed and ${NAMES[writer]} settled it`, true);
       return;
     }
     view.status(`${NAMES[writer]} is writing the answer`);
-    const searchFor = turn.depth === 1 ? 0 : 3; // Quick checks from what the checker already knows.
+    // Gemini's Google Search is its main strength, so it always searches when it checks; Claude skips search on Quick.
+    const searchFor = checker === "gemini" || turn.depth > 1 ? 3 : 0;
     let answer = (await pairStep("Answer", "opening", () => P.draft(ctx, q), turn.search ? S.opening : 0, files, [writer], { cache: false }))[writer];
     const rounds = turn.depth === 3 ? 2 : 1;
     turn.checkResult = "ok";
@@ -1141,13 +1197,13 @@ function renderEmpty() {
       .forEach(([b, s]) => { const d = el("div"); d.appendChild(el("b", null, b)); d.appendChild(el("span", null, s)); how0.appendChild(d); });
     wrap.appendChild(how0);
   }
-  if (!create) wrap.appendChild(el("h1", null, "One strong answer, fact-checked by a second AI."));
-  if (!create) wrap.appendChild(el("p", null, "Claude writes the answer; Gemini, built by a different company, checks the facts it rests on with Google Search; Claude fixes what was wrong. Questions about reasoning or writing skip the check and get more thinking instead."));
+  if (!create) wrap.appendChild(el("h1", null, "One strong answer from two AIs that check each other."));
+  if (!create) wrap.appendChild(el("p", null, "Whichever model suits the question leads: Gemini for search-heavy, current, local, photo and long-file questions, Claude for reasoning, writing and advice. The other fact-checks it, or on problems with one right answer, both solve it separately and the answers are compared blind."));
   const how = el("div", "howto");
-  [["1 · Route", "A tiny model decides how much power the question needs, and whether checking facts would help."],
-   ["2 · Answer", "Claude thinks it through and writes the answer, with web search."],
-   ["3 · Fact-check", "Gemini checks the facts and sources with Google Search. Skipped for math, writing and reasoning."],
-   ["4 · Fix", "Claude fixes anything that was wrong. Skipped if nothing was."]]
+  [["1 · Route", "A tiny model picks the power, the lead model, and whether to fact-check, solve twice, or answer alone."],
+   ["2 · Answer", "The lead writes the answer with web search. On math and logic, both solve it separately."],
+   ["3 · Check", "The other model fact-checks the sources and numbers. Two solutions are compared; if they differ, the lead settles it blind."],
+   ["4 · Fix", "The lead fixes anything that was wrong. Skipped if nothing was."]]
     .forEach(([b, s]) => { const d = el("div"); d.appendChild(el("b", null, b)); d.appendChild(el("span", null, s)); how.appendChild(d); });
   if (!create) wrap.appendChild(how);
   if (!settings.claudeKey || !settings.geminiKey) {
@@ -1188,7 +1244,7 @@ function renderTurn(convo, index, live) {
   const chev = el("span", "chev", "▸");
   const pulse = el("span", "pulse");
   const made = t.task === "create";
-  const showWord = made ? "how they built it" : t.checkPlan || (t.status === "running" && t.who === "council") ? "the fact-check" : "the debate";
+  const showWord = made ? "how they built it" : t.checkPlan === "solve" ? "both solutions" : t.checkPlan || (t.status === "running" && t.who === "council") ? "the fact-check" : "the debate";
   const status = el("span", "status", t.status === "done" ? (made ? `Built in ${t.steps.length} steps` : `Debate: ${t.steps.length} steps`) : (t.status === "error" ? "Something went wrong" : t.status === "stopped" ? "Stopped" : ""));
   const hint = el("span", null, "Show " + showWord);
   sum.append(chev, pulse, status, hint);
@@ -1252,7 +1308,8 @@ function renderTurn(convo, index, live) {
         : counts.length ? `Written by ${NAMES[counts[0][0]]} from both models' ideas` : "Built together";
       const how = t.who && t.who !== "council" ? `${made ? "Made" : "Answered"} by ${NAMES[t.who]} alone`
         : made ? `${split} · ${["", "Quick", "Standard", "Deep"][t.depth]}`
-        : t.checkPlan === "solo" ? `Answered by ${NAMES[t.final.by]} · fact-check skipped (reasoning question)`
+        : t.checkPlan === "solo" ? `Answered by ${NAMES[t.final.by]} · ${t.route === "solve" ? "solved alone on Quick" : "no check needed (writing or advice)"}`
+        : t.checkPlan === "solve" ? (t.checkResult === "agree" ? `Solved separately by both · same answer` : `Solved separately by both · answers differed, ${NAMES[t.final.by]} settled it`)
         : t.checkPlan ? `Written by ${NAMES[t.final.by]} · fact-checked by ${NAMES[OTHER[t.final.by]]}${t.checkResult === "fixed" ? ", issues fixed" : ", no major issues"}`
         : `Final draft by ${NAMES[t.final.by] || "Claude"} · ${["", "Quick", "Standard", "Deep"][t.depth]} debate`;
       const used = t.checkPlan === "solo" ? (t.final.by || "claude") : t.who;
@@ -1485,7 +1542,7 @@ function syncOpts() {
   $("#deliverWrap").hidden = !create; $("#deliverSel").value = settings.deliver || "google";
   document.querySelectorAll("#taskSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.task === settings.task)));
   const tips = create ? ["Write it, no cross-check (cheapest)", "Write it, then check each other's parts", "More research per part, then check"]
-    : ["Fact-check without new searches (cheapest)", "Fact-check with web search", "Always fact-check, up to two rounds"];
+    : ["Cheapest: math and logic get one solver, Claude checks without new searches", "Checks with web search; math and logic solved by both", "Never answers alone; fact-checks up to two rounds"];
   document.querySelectorAll("#depthSeg button").forEach(b => b.title = tips[+b.dataset.depth - 1]);
   input.placeholder = create ? (settings.who === "council" ? "Describe what to make: study guide, paper, business plan…" : `Describe what ${NAMES[settings.who]} should make…`)
     : settings.who === "council" ? "Ask the council anything…" : `Ask ${NAMES[settings.who]} anything…`;

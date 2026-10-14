@@ -1,15 +1,17 @@
 # Council
 
-Ask one question and get one strong answer, fact-checked by a second AI. Claude writes the answer; Gemini, built by a different company, checks the facts it rests on with Google Search; Claude fixes whatever was wrong.
+Ask one question and get one strong answer from two AIs that check each other. Whichever model suits the question leads: Gemini for search-heavy, current, local, photo and long-file questions; Claude for reasoning, writing and advice. The other one fact-checks, or on problems with one right answer, both solve it separately and the answers are compared blind.
 
 **Open the app:** https://mrbooty42.github.io/council/
 
 ## How it works
-One answer, fact-checked by a second AI. Claude writes, Gemini checks the facts with Google Search, Claude fixes what's wrong. Auto picks cheap or max power per question. Create mode builds docs and slide decks and opens them in Google Docs/Slides or downloads Word/PowerPoint. Reads PDFs, Word, photos and your Google Drive.
+One answer from two AIs. A tiny model picks the power and the lead: Gemini leads search-heavy, current, local, photo and long-file questions; Claude leads reasoning, writing and advice (you can force either in Settings). The other model fact-checks the answer, Gemini always with Google Search, and the lead fixes what's wrong. On math and logic, both solve it separately and the answers are compared blind. Writing and simple questions get one model. Create mode builds docs and slide decks and opens them in Google Docs/Slides or downloads Word/PowerPoint. Reads PDFs, Word, photos and your Google Drive.
 
-Quick checks without new searches, Standard checks with search, Deep always checks and runs up to two rounds.
+Quick is the cheapest: math and logic get one solver thinking harder, and Claude checks without new searches. Standard solves math and logic twice and checks with search. Deep never skips the second model and fact-checks up to two rounds.
 
-**Power:** Auto (default) has a tiny model read each question and pick Economy (Claude Sonnet 5.5 + Gemini 3.8 Flash) for everyday questions or Max (Claude Opus 5.5 + Gemini 4 Argon) for hard or high-stakes ones. You can also force Economy or Max.
+**Power:** Auto (default) has a tiny model read each question and pick Economy (Claude Sonnet 5.5) for everyday questions or Max (Claude Opus 5.5) for hard or high-stakes ones. Gemini always runs the model chosen in Settings (Gemini 4 Argon by default), because it costs a fraction of Claude. You can also force Economy or Max.
+
+In Create mode, the plan step sees both models' proposals as A and B in random order, so the best idea wins each part regardless of who wrote it.
 
 Also: PDF, Word, PowerPoint and photo uploads; attach from Google Drive (Docs, Slides, Sheets, any file); save results to Google Docs or Google Slides; Create mode can make a slide deck and download it as PowerPoint; solo mode (one model, much cheaper); a monthly spend tracker; Download for Word; history backup.
 
