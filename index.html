@@ -261,7 +261,7 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
           </select>
         </label>
         <span class="seg" id="whoSeg" role="group" aria-label="Who answers">
-          <button data-who="council" aria-pressed="true" title="Both models debate">Both</button>
+          <button data-who="council" aria-pressed="true" title="Claude answers and Gemini fact-checks when facts matter">Both</button>
           <button data-who="claude" aria-pressed="false" title="Claude answers alone, much cheaper">Claude</button>
           <button data-who="gemini" aria-pressed="false" title="Gemini answers alone, much cheaper">Gemini</button>
         </span>
@@ -635,10 +635,11 @@ function contextBlock(convo, uptoIndex) {
 }
 
 const P = {
-  opening: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nGive your own best answer. Your partner is answering separately at the same time, and next you will review each other's work, so commit to clear positions instead of hedging. End with a short list of the claims you are least sure about.`,
-  critique: (ctx, q, mine, theirs, other) => `${ctx}Drew's question:\n${q}\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nYour own current answer, for reference:\n<<<\n${mine}\n>>>\n\nReview ${other}'s answer as a teammate whose only goal is the best answer for Drew. Start with one or two lines on what you agree with; do not argue those points. Then list only the problems that matter: factual errors, weak or low-quality sources, flawed reasoning, important gaps, or advice that would not survive real life. Rank them by how much they would hurt Drew if he acted on the answer, and skip anything minor or stylistic. Verify a doubtful claim with a search only if it matters. Mention anything it gets right that your answer missed. Do not rewrite either answer.\n\nOn the very last line write exactly one of these and nothing else:\nVERDICT: NO MAJOR ISSUES\nVERDICT: ISSUES FOUND`,
-  revise: (ctx, q, mine, critique, theirs, other) => `${ctx}Drew's question:\n${q}\n\nYour current answer:\n<<<\n${mine}\n>>>\n\n${other}'s review of your answer:\n<<<\n${critique}\n>>>\n\n${other}'s current answer:\n<<<\n${theirs}\n>>>\n\nFirst, under "## Response to review", go through the points briefly: accept what is right without defending your old wording, and push back only where you have a real reason. Then write your complete improved answer under "## Revised answer", taking anything better from ${other}'s answer. On the very last line write exactly one of these and nothing else:\nSTANCE: AGREE (you would sign ${other}'s answer as it stands)\nSTANCE: MOSTLY AGREE\nSTANCE: DISAGREE`,
   solo: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nThis time you are answering alone, without your partner, so check your own work: verify claims that matter and say where you are unsure.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nKeep links to the sources behind the key claims.`,
+  // Ask: one model writes, the other only fact-checks, then the writer fixes what was wrong.
+  draft: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nWrite the best answer you can. Your partner will fact-check it afterwards with web search, so think it through properly, commit to clear positions, and link the sources behind the key facts.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.`,
+  factcheck: (ctx, q, answer, writer) => `${ctx}Drew's question:\n${q}\n\n${writer}'s answer:\n<<<\n${answer}\n>>>\n\nYou are the fact-checker, not a second author. Do not rewrite the answer or add your own take. Check the facts it rests on: numbers, prices, dates, names, rules and laws, claims about products, companies or research, and whether each linked source is real, reliable and actually says what the answer claims. Search to verify anything that matters and is not common knowledge. Also flag a major reasoning error or an important missing fact if you are confident it changes what Drew should do.\n\nList only problems that matter, most important first. For each: the claim, what is wrong, the correct information, and the source. Skip style, wording and minor points. If everything that matters checks out, say so in one line.\n\nOn the very last line write exactly one of these and nothing else:\nVERDICT: NO MAJOR ISSUES\nVERDICT: ISSUES FOUND`,
+  fixup: (ctx, q, answer, check, checker) => `${ctx}Drew's question:\n${q}\n\nYour answer:\n<<<\n${answer}\n>>>\n\n${checker}'s fact-check of it:\n<<<\n${check}\n>>>\n\nWrite the final answer for Drew. Fix every point where the fact-check is right. Where you are confident it is wrong, keep your version, and list those points under "## Where the council disagrees" with one sentence for each side and which you would bet on. Leave that section out if you accepted everything. Keep the same format: direct answer first, then the full answer, then "## Confidence". Do not mention the fact-check or describe this process.`,
   // Create: the models split one piece of work instead of each doing all of it.
   pitch: (ctx, q) => `${ctx}Drew wants the council to make this:\n${q}\n\nPropose how to build it. Your partner is proposing separately; then one plan will be made that takes the better idea for each part, and the parts get split between you to write. Keep it short (under 250 words) and do not write the content yet:\n- A numbered list of 3 to 8 parts. For each: a title and one or two lines on what goes in it and how you would approach it.\n- One line on format and tone (who it is for, how long, how it should read).\nDo not search the web in this step.\nIf the task is unclear, assume the most useful reading and say so in one line.`,
   plan: (ctx, q, a, b) => `${ctx}Drew wants the council to make this:\n${q}\n\nClaude's proposal:\n<<<\n${a}\n>>>\n\nGemini's proposal:\n<<<\n${b}\n>>>\n\nMake the plan. For each part, take the better idea from the two proposals or combine them; judge the ideas, not who wrote them. Then assign each part to one writer, usually the model whose idea won that part. Where it is a tie, Gemini takes parts that depend most on current facts, prices or local data (it has strong Google Search), and Claude takes parts that are mostly reasoning, structure or explanation. Do not give one model everything unless its ideas were clearly better throughout. 3 to 8 parts, in reading order.\n\nReply with only this JSON and nothing else:\n{"title": "document title", "style": "one or two lines on format, tone and length that both writers must follow", "parts": [{"n": 1, "title": "part title", "writer": "claude or gemini", "brief": "what this part must cover and how", "why": "a few words on whose idea and why"}]}`,
@@ -648,7 +649,6 @@ const P = {
   check: (ctx, q, plan, theirs, mine, other) => `${ctx}Drew wants the council to make this:\n${q}\n\nThe council's plan:\n${planText(plan)}\n\nThe parts ${other} wrote:\n<<<\n${theirs}\n>>>\n\nThe parts you wrote, for reference:\n<<<\n${mine || "(none)"}\n>>>\n\nCheck ${other}'s parts as a teammate. Flag only problems that matter: factual errors, weak or low-quality sources, content the plan called for that is missing or wrong, anything that contradicts or repeats your parts, or anything that would cost Drew marks, money or credibility. Name the part number for each. Skip wording and style preferences. Keep it short.\n\nOn the very last line write exactly one of these and nothing else:\nVERDICT: NO MAJOR ISSUES\nVERDICT: ISSUES FOUND`,
   fix: (ctx, q, plan, mine, review, other) => `${ctx}Drew wants the council to make this:\n${q}\n\nThe council's plan:\n${planText(plan)}\n\nYour parts:\n<<<\n${mine}\n>>>\n\n${other}'s check of your parts:\n<<<\n${review}\n>>>\n\nFix the problems that are real; ignore any point you have good reason to think is wrong. Output only the parts you changed, each complete (not a list of edits), starting with a line containing only @@PART n@@ and then its "## title" heading. If nothing needs changing, reply with exactly: NO CHANGES`,
   makeSolo: (ctx, q) => `${ctx}Drew wants you to make this:\n${q}\n\nYou are working alone this time. Write the finished piece Drew can use as is: clear headings, the right length for the purpose, and accurate content. Verify facts that matter and link the best sources behind them. If the task is unclear, assume the most useful reading and say so in one line at the top. No preamble or closing remarks.`,
-  final: (ctx, q, a, b, ca, cb) => `${ctx}Drew's question:\n${q}\n\nThe debate is over. Here is where it ended.\n\nClaude's final answer:\n<<<\n${a}\n>>>\n\nGemini's final answer:\n<<<\n${b}\n>>>\n\nClaude's last review of Gemini:\n<<<\n${ca}\n>>>\n\nGemini's last review of Claude:\n<<<\n${cb}\n>>>\n\nWrite the council's single final answer for Drew. Be fair: build it from the strongest parts of both answers, not from your own by default, and drop anything that was shown to be wrong.\n\nFormat:\n- Start with the direct answer in the first sentence or two.\n- Then the full answer. Use headings, lists or a table only where they make it easier to use.\n- Then "## Where the council disagrees", only if a real disagreement remains. State each side in a sentence, and which one you would bet on and why. Leave this section out if they agree.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.\n\nDo not describe the debate or mention rounds. Keep links only to the best sources behind the key claims; drop weak ones.`,
 };
 
 const SLIDES_RULE = `\n\nThe output is a slide deck, not a document. Each part is a section of 1 to 5 slides. When you write slides, write each one as a line "### Slide title", then 3 to 6 short bullets (under 15 words each), then optionally one line starting "Notes:" with what Drew should say out loud. No paragraphs on slides.`;
@@ -680,11 +680,6 @@ function splitParts(text, expected) {
   return out;
 }
 const showParts = text => text.replace(/^\s*@@PART\s*(\d+)\s*@@\s*$/gm, "");
-function revisedPart(text) {
-  const m = text.split(/^##\s*Revised answer\s*$/im);
-  const body = m.length > 1 ? m.slice(1).join("") : text;
-  return body.replace(/\n?STANCE:\s*(MOSTLY AGREE|AGREE|DISAGREE).*$/i, "").trim();
-}
 function verdictOf(text) {
   const m = text.match(/VERDICT:\s*(NO MAJOR ISSUES|ISSUES FOUND)/i);
   return m ? (/NO MAJOR/i.test(m[1]) ? "OK" : "ISSUES") : null;
@@ -710,13 +705,22 @@ let running = null; // AbortController while a debate runs
 function call(who, opts) { return who === "claude" ? callClaude(opts) : callGemini(opts); }
 
 // Auto power: a very cheap model reads the question and decides whether it needs Max.
+// Auto: a very cheap model reads the question and decides how much power it needs and,
+// for council questions, whether a second model fact-checking the answer would help.
 async function pickTier(turn, signal) {
-  if (turn.power !== "auto") return { tier: turn.power, cost: 0 };
-  if (!settings.claudeKey) return { tier: "economy", cost: 0 };
-  const prompt = `Decide how much reasoning power this question needs. Reply with exactly one word: HEAVY or LIGHT.
+  const council = turn.who === "council" && turn.task !== "create";
+  const auto = turn.power === "auto";
+  if (!auto && !council) return { tier: turn.power, check: true, cost: 0 };
+  if (!settings.claudeKey) return { tier: auto ? "economy" : turn.power, check: true, cost: 0 };
+  const prompt = `Read this question and reply with exactly two words.
 
+First word, how much reasoning power it needs:
 HEAVY: hard multi-step reasoning, advanced math, science or technical work, rigorous research across many sources, long or several attached documents, or high-stakes choices (large sums of money, legal, medical, signing contracts, major life decisions).
 LIGHT: everything else, including everyday facts, explanations, writing help, quick business questions and summaries of a short file.
+
+Second word, whether a second AI fact-checking the answer with web search would make it better:
+CHECK: the answer rests on facts that can be wrong or out of date: prices, statistics, laws and rules, recent events, product or company details, research findings, citations, or a decision that depends on such facts.
+SOLO: the answer rests on reasoning or writing, not checkable facts: math, logic, coding, explaining a concept, brainstorming, editing or writing text, opinions and advice from first principles.
 
 Mode: ${turn.mode}. Attached files: ${turn.files?.length || 0}.${turn.task === "create" ? "\nThis is a request to make something (a document, guide or plan). Length alone does not make it HEAVY; judge by how hard the content is to get right." : ""}
 Question: ${turn.q.slice(0, 4000)}`;
@@ -730,11 +734,11 @@ Question: ${turn.q.slice(0, 4000)}`;
     const j = await res.json();
     const word = (j.content || []).map(b => b.text || "").join("").toUpperCase();
     const cost = ((j.usage?.input_tokens || 0) * PRICES[ROUTER_MODEL].in + (j.usage?.output_tokens || 0) * PRICES[ROUTER_MODEL].out) / 1e6;
-    return { tier: word.includes("HEAVY") ? "max" : "economy", cost };
+    return { tier: auto ? (word.includes("HEAVY") ? "max" : "economy") : turn.power, check: !word.includes("SOLO"), cost };
   } catch (e) {
     if (e.name === "AbortError") throw e;
     if (e.status === 401 || e.status === 403) throw e;
-    return { tier: "economy", cost: 0 };
+    return { tier: auto ? "economy" : turn.power, check: true, cost: 0 };
   }
 }
 
@@ -896,7 +900,7 @@ async function runCouncil(convo, turnIndex) {
   const search = turn.search;
   const signal = running.signal;
   // Searches per call: they add cost on every step, so only the steps that state or check facts get them.
-  const S = { opening: search ? 3 : 0, critique: search ? 2 : 0, solo: search ? 4 : 0 };
+  const S = { opening: search ? 3 : 0, solo: search ? 4 : 0 };
   turn.cost = 0;
   turn.costBy = { claude: 0, gemini: 0 };
 
@@ -912,8 +916,9 @@ async function runCouncil(convo, turnIndex) {
     const t = TIERS[turn.claudeTier];
     return files?.length || !LIGHT.has(kind) ? t : { ...t, effort: LOWER[t.effort] || t.effort };
   };
-  async function pairStep(label, kind, makePrompt, useSearch, files, whos = ["claude", "gemini"]) {
-    if (files?.length) useSearch = fileSearch;
+  async function pairStep(label, kind, makePrompt, useSearch, files, whos = ["claude", "gemini"], opts = {}) {
+    const cache = opts.cache ?? !!files?.length;
+    if (files?.length && cache) useSearch = fileSearch;
     const step = { label, kind, claude: { text: "" }, gemini: { text: "" } };
     if (whos.length < 2) step.whos = whos;
     turn.steps.push(step);
@@ -921,8 +926,8 @@ async function runCouncil(convo, turnIndex) {
     const runOne = async who => {
       try {
         const r = await call(who, {
-          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files, tier: tierFor(kind, files), gmodel: turn.geminiModel,
-          cache: !!files?.length,
+          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files, tier: opts.fullEffort ? TIERS[turn.claudeTier] : tierFor(kind, files), gmodel: turn.geminiModel,
+          cache,
           onText: t => { step[who].text = t; view.updateVoice(step, who); },
         });
         step[who].text = r.text; step[who].sources = r.sources; step[who].cost = r.cost; turn.cost += r.cost; turn.costBy[who] += r.cost;
@@ -1002,6 +1007,7 @@ async function runCouncil(convo, turnIndex) {
     view.status("Choosing how much power this question needs");
     const pick = await pickTier(turn, signal);
     turn.claudeTier = pick.tier; turn.geminiModel = geminiFor(pick.tier);
+    if (turn.who === "council" && turn.task !== "create") turn.checkPlan = turn.depth === 3 || pick.check ? "check" : "solo";
     turn.cost += pick.cost; turn.costBy.claude += pick.cost;
     view.tier();
     if (turn._sources) await findMyFiles(turn, files, view, signal);
@@ -1022,48 +1028,50 @@ async function runCouncil(convo, turnIndex) {
       return;
     }
     if (turn.task === "create") { await buildTogether(files); return; }
-    fileSearch = S.opening;
-    view.status("Opening statements: both models are answering");
-    // Files go to the opening and critique steps, where facts get stated and checked.
-    let ans = await pairStep("Opening statements", "opening", () => P.opening(ctx, q), S.opening, files);
-    let lastCrit = { claude: "", gemini: "" };
-    const rounds = turn.depth;
-    for (let r = 1; r <= rounds; r++) {
-      view.status(`Round ${r} of ${rounds}: reviewing each other's answers`);
-      const crit = await pairStep(`Round ${r} · Review`, "critique",
-        who => P.critique(ctx, q, ans[who], ans[OTHER[who]], NAMES[OTHER[who]]), S.critique, files);
-      if (verdictOf(crit.claude) === "OK" && verdictOf(crit.gemini) === "OK") {
-        lastCrit = crit;
-        view.note(`Both models found no major issues in each other's answers${r > 1 ? ` in round ${r}` : ""}, so they went straight to the final answer.`);
-        break;
-      }
-      view.status(`Round ${r} of ${rounds}: revising`);
-      const rev = await pairStep(`Round ${r} · Revision`, "revise",
-        who => P.revise(ctx, q, ans[who], crit[OTHER[who]], ans[OTHER[who]], NAMES[OTHER[who]]), 0);
-      lastCrit = crit;
-      const stances = { claude: stanceOf(rev.claude), gemini: stanceOf(rev.gemini) };
-      ans = { claude: revisedPart(rev.claude), gemini: revisedPart(rev.gemini) };
-      if (stances.claude !== "DISAGREE" && stances.gemini !== "DISAGREE" && r < rounds) {
-        view.note(`The models agreed on the substance after round ${r}, so the remaining rounds were skipped.`);
-        break;
-      }
+    const writer = turn.judge || "claude", checker = OTHER[writer];
+    const all = () => { const out = []; for (const st of turn.steps) for (const w of ["claude", "gemini"]) for (const src of st[w].sources || []) out.push(src); return dedupe(out); };
+    const finish = (text, by) => {
+      turn.final = { text, by, sources: citedFirst(text, all()) };
+      turn.status = "done";
+      view.showFinal(); view.updateFinal(true);
+    };
+    if (turn.checkPlan === "solo") {
+      // Reasoning or writing: a fact-check adds cost without adding much, so the writer thinks harder instead.
+      const t = TIERS[turn.claudeTier];
+      const deeper = writer === "claude" ? { ...t, effort: { low: "medium", medium: "high", high: "xhigh" }[t.effort] || t.effort } : t;
+      view.status(`${NAMES[writer]} is answering (no fact-check needed for this kind of question)`);
+      turn.final = { text: "", by: writer };
+      view.showFinal();
+      const r = await call(writer, {
+        system: systemFor(writer, turn), prompt: P.solo(ctx, q), search: S.solo, signal, files, tier: deeper, gmodel: turn.geminiModel,
+        onText: x => { turn.final.text = x; view.updateFinal(); },
+      });
+      turn.cost += r.cost; turn.costBy[writer] += r.cost;
+      turn.final = { text: r.text, by: writer, sources: citedFirst(r.text, dedupe(r.sources)) };
+      turn.status = "done";
+      view.updateFinal(true);
+      view.status(`Answered by ${NAMES[writer]}; skipped the fact-check because this question is about reasoning, not facts`, true);
+      return;
     }
-    const judge = turn.judge;
-    view.status(`${NAMES[judge]} is writing the final answer`);
-    turn.final = { text: "", by: judge };
-    view.showFinal();
-    const fin = await call(judge, {
-      system: systemFor(judge, turn), search: 0, signal, tier: TIERS[turn.claudeTier], gmodel: turn.geminiModel,
-      prompt: P.final(ctx, q, ans.claude, ans.gemini, lastCrit.claude, lastCrit.gemini),
-      onText: t => { turn.final.text = t; view.updateFinal(); },
-    });
-    turn.cost += fin.cost; turn.costBy[judge] += fin.cost;
-    const all = [];
-    for (const s of turn.steps) for (const w of ["claude", "gemini"]) for (const src of s[w].sources || []) all.push(src);
-    turn.final = { text: fin.text, by: judge, sources: citedFirst(fin.text, dedupe(all)) };
-    turn.status = "done";
-    view.updateFinal(true);
-    view.status(`Debate finished: ${turn.steps.length} steps`, true);
+    view.status(`${NAMES[writer]} is writing the answer`);
+    const searchFor = turn.depth === 1 ? 0 : 3; // Quick checks from what the checker already knows.
+    let answer = (await pairStep("Answer", "opening", () => P.draft(ctx, q), turn.search ? S.opening : 0, files, [writer], { cache: false }))[writer];
+    const rounds = turn.depth === 3 ? 2 : 1;
+    turn.checkResult = "ok";
+    for (let r = 1; r <= rounds; r++) {
+      view.status(`${NAMES[checker]} is fact-checking`);
+      const check = (await pairStep(rounds > 1 ? `Fact-check ${r}` : "Fact-check", "critique", () => P.factcheck(ctx, q, answer, NAMES[writer]),
+        turn.search ? searchFor : 0, files, [checker], { cache: false, fullEffort: true }))[checker];
+      if (verdictOf(check) === "OK") {
+        view.note(r === 1 ? `${NAMES[checker]} checked the facts and found no major issues.` : `${NAMES[checker]} found no more issues after the fixes.`);
+        break;
+      }
+      turn.checkResult = "fixed";
+      view.status(`${NAMES[writer]} is fixing what the fact-check found`);
+      answer = (await pairStep(rounds > 1 ? `Fixes ${r}` : "Fixes", "revise", () => P.fixup(ctx, q, answer, check, NAMES[checker]), 0, [], [writer]))[writer];
+    }
+    finish(answer, writer);
+    view.status(turn.checkResult === "fixed" ? `Done: ${NAMES[checker]} caught issues and ${NAMES[writer]} fixed them` : `Done: ${NAMES[checker]} confirmed the facts`, true);
   } catch (e) {
     turn.status = e.name === "AbortError" ? "stopped" : "error";
     turn.error = e.name === "AbortError" ? "You stopped this debate." : e.message;
@@ -1133,13 +1141,13 @@ function renderEmpty() {
       .forEach(([b, s]) => { const d = el("div"); d.appendChild(el("b", null, b)); d.appendChild(el("span", null, s)); how0.appendChild(d); });
     wrap.appendChild(how0);
   }
-  if (!create) wrap.appendChild(el("h1", null, "Two models work it out. You get one answer."));
-  if (!create) wrap.appendChild(el("p", null, "Claude and Gemini each answer your question, check each other's work, fix what matters, and merge the strongest version into one answer. Anything they still disagree on is spelled out."));
+  if (!create) wrap.appendChild(el("h1", null, "One strong answer, fact-checked by a second AI."));
+  if (!create) wrap.appendChild(el("p", null, "Claude writes the answer; Gemini, built by a different company, checks the facts it rests on with Google Search; Claude fixes what was wrong. Questions about reasoning or writing skip the check and get more thinking instead."));
   const how = el("div", "howto");
-  [["1 · Opening", "Both answer on their own, with web search."],
-   ["2 · Review", "Each checks the other's answer for problems that matter, and agrees with the rest."],
-   ["3 · Revise", "Each takes the good points and improves. Skipped if neither found real problems."],
-   ["4 · Verdict", "One merged answer plus open disagreements."]]
+  [["1 · Route", "A tiny model decides how much power the question needs, and whether checking facts would help."],
+   ["2 · Answer", "Claude thinks it through and writes the answer, with web search."],
+   ["3 · Fact-check", "Gemini checks the facts and sources with Google Search. Skipped for math, writing and reasoning."],
+   ["4 · Fix", "Claude fixes anything that was wrong. Skipped if nothing was."]]
     .forEach(([b, s]) => { const d = el("div"); d.appendChild(el("b", null, b)); d.appendChild(el("span", null, s)); how.appendChild(d); });
   if (!create) wrap.appendChild(how);
   if (!settings.claudeKey || !settings.geminiKey) {
@@ -1173,12 +1181,14 @@ function renderTurn(convo, index, live) {
 
   const det = el("details", "debate");
   if (t.who && t.who !== "council") det.hidden = true;
+  const hideIfSolo = () => { if (t.checkPlan === "solo") det.hidden = true; };
+  hideIfSolo();
   det.open = live;
   const sum = el("summary");
   const chev = el("span", "chev", "▸");
   const pulse = el("span", "pulse");
   const made = t.task === "create";
-  const showWord = made ? "how they built it" : "the debate";
+  const showWord = made ? "how they built it" : t.checkPlan || (t.status === "running" && t.who === "council") ? "the fact-check" : "the debate";
   const status = el("span", "status", t.status === "done" ? (made ? `Built in ${t.steps.length} steps` : `Debate: ${t.steps.length} steps`) : (t.status === "error" ? "Something went wrong" : t.status === "stopped" ? "Stopped" : ""));
   const hint = el("span", null, "Show " + showWord);
   sum.append(chev, pulse, status, hint);
@@ -1241,13 +1251,17 @@ function renderTurn(convo, index, live) {
       const split = counts.length > 1 ? `Built together: ${counts.map(([w, n]) => `${NAMES[w]} wrote ${n}`).join(", ")} of ${t.plan.parts.length} parts`
         : counts.length ? `Written by ${NAMES[counts[0][0]]} from both models' ideas` : "Built together";
       const how = t.who && t.who !== "council" ? `${made ? "Made" : "Answered"} by ${NAMES[t.who]} alone`
-        : made ? `${split} · ${["", "Quick", "Standard", "Deep"][t.depth]}` : `Final draft by ${NAMES[t.final.by] || "Claude"} · ${["", "Quick", "Standard", "Deep"][t.depth]} debate`;
-      const models = [t.who !== "gemini" && TIERS[t.claudeTier]?.label, t.who !== "claude" && GEMINI_LABELS[t.geminiModel]].filter(Boolean).join(" + ");
+        : made ? `${split} · ${["", "Quick", "Standard", "Deep"][t.depth]}`
+        : t.checkPlan === "solo" ? `Answered by ${NAMES[t.final.by]} · fact-check skipped (reasoning question)`
+        : t.checkPlan ? `Written by ${NAMES[t.final.by]} · fact-checked by ${NAMES[OTHER[t.final.by]]}${t.checkResult === "fixed" ? ", issues fixed" : ", no major issues"}`
+        : `Final draft by ${NAMES[t.final.by] || "Claude"} · ${["", "Quick", "Standard", "Deep"][t.depth]} debate`;
+      const used = t.checkPlan === "solo" ? (t.final.by || "claude") : t.who;
+      const models = [used !== "gemini" && TIERS[t.claudeTier]?.label, used !== "claude" && GEMINI_LABELS[t.geminiModel]].filter(Boolean).join(" + ");
       const tierName = t.claudeTier ? ` · ${t.claudeTier === "max" ? "Max" : "Economy"} power${t.power === "auto" ? " (auto)" : ""}: ${models}` : "";
       meta.appendChild(el("span", null, how + (modeName ? ` · ${modeName} mode` : "") + tierName));
       const spend = el("span", "spend");
       spend.append("Spent ≈ ", el("b", null, money(t.cost || 0)));
-      if (t.costBy && (!t.who || t.who === "council")) {
+      if (t.costBy && (!t.who || t.who === "council") && t.checkPlan !== "solo") {
         spend.append(" · "); spend.appendChild(el("span", "c-claude", `Claude ${money(t.costBy.claude)}`));
         spend.append(" · "); spend.appendChild(el("span", "c-gemini", `Gemini ${money(t.costBy.gemini)}`));
       }
@@ -1298,7 +1312,7 @@ function renderTurn(convo, index, live) {
     note(text) { t.note = t.note ? t.note + " " + text : text; steps.appendChild(el("div", "note", text)); },
     found() { foundLine.hidden = !t.found?.length; foundLine.textContent = "🔎 Opened from your files: " + (t.found || []).join(", "); },
     tier() { if (t.claudeTier) status.textContent = `${t.claudeTier === "max" ? "Max" : "Economy"} power${t.power === "auto" ? " (picked automatically)" : ""}`; },
-    showFinal() { finalBox.hidden = false; det.open = false; drawFinal(); scrollToEnd(); },
+    showFinal() { finalBox.hidden = false; det.open = false; hideIfSolo(); drawFinal(); scrollToEnd(); },
     updateFinal(now) { now ? drawFinal() : drawFinalT(); },
     error(msg) { errBox.hidden = false; errBox.textContent = msg; det.open = true; },
   };
@@ -1417,9 +1431,6 @@ async function ask() {
   if (budget && spentThisMonth() >= budget && armed !== "budget") {
     armed = "budget"; showWarn(`You've spent about ${money(spentThisMonth())} of your $${budget} budget this month. Click Ask again to go ahead anyway.`); return;
   }
-  if (council && settings.task !== "create" && settings.depth === 3 && armed !== "deep" && armed !== "budget") {
-    armed = "deep"; showWarn("Deep runs three rounds and usually costs 2 to 3 times a Standard debate. Click Ask again to run it."); return;
-  }
   armed = null; showWarn("");
   let c = activeConvo();
   if (!c) {
@@ -1474,7 +1485,7 @@ function syncOpts() {
   $("#deliverWrap").hidden = !create; $("#deliverSel").value = settings.deliver || "google";
   document.querySelectorAll("#taskSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.task === settings.task)));
   const tips = create ? ["Write it, no cross-check (cheapest)", "Write it, then check each other's parts", "More research per part, then check"]
-    : ["1 round of review", "Up to 2 rounds of review", "Up to 3 rounds of review"];
+    : ["Fact-check without new searches (cheapest)", "Fact-check with web search", "Always fact-check, up to two rounds"];
   document.querySelectorAll("#depthSeg button").forEach(b => b.title = tips[+b.dataset.depth - 1]);
   input.placeholder = create ? (settings.who === "council" ? "Describe what to make: study guide, paper, business plan…" : `Describe what ${NAMES[settings.who]} should make…`)
     : settings.who === "council" ? "Ask the council anything…" : `Ask ${NAMES[settings.who]} anything…`;

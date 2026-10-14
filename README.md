@@ -1,26 +1,16 @@
 # Council
 
-Ask one question and two AIs work it out. Claude and Gemini each answer on their own with web search, check each other's work, fix only what matters, then merge into one final answer that lists where they still disagree and how confident they are.
+Ask one question and get one strong answer, fact-checked by a second AI. Claude writes the answer; Gemini, built by a different company, checks the facts it rests on with Google Search; Claude fixes whatever was wrong.
 
 **Open the app:** https://mrbooty42.github.io/council/
 
 ## How it works
-1. **Opening:** both models answer independently.
-2. **Review:** each one checks the other's answer, agrees with what's right, and flags only problems that matter (including weak sources).
-3. **Revise:** each takes the good points and improves its answer. Skipped when neither review finds a real problem. Quick runs at most one round, Standard two, Deep three, and it stops as soon as they agree on the substance.
-4. **Verdict:** one model merges the best of both into a single answer. It favors a few strong primary sources over many weak ones, and the source list shows only what the answer actually cites.
+1. **Route:** a tiny, cheap model reads the question and decides how much power it needs, and whether a fact-check would help.
+2. **Answer:** Claude thinks it through and writes the answer, with web search.
+3. **Fact-check:** Gemini checks the numbers, dates, rules, claims and sources with Google Search. It doesn't write its own answer. Math, writing and pure reasoning questions skip this step and get more thinking from Claude instead.
+4. **Fix:** if the check found real problems, Claude fixes them (and lists any point it disputes). Skipped if nothing was wrong.
 
-## Create mode
-Switch the toggle from **Ask** to **Create** to make something instead of asking a question: a study guide, a paper outline, a business plan, a pitch.
-1. **Ideas:** both models pitch a short outline.
-2. **Plan:** one plan takes the better idea for each part and gives each part one writer.
-3. **Write:** each model writes only its own parts, at the same time, so the work is paid for once.
-4. **Check:** each checks the other's parts and fixes only real problems. Quick skips this; Deep adds more research per part.
-
-Pick **Make: Document or Slides** and **Then: Open in Google / Download Word/PowerPoint / Just show it**. With Open in Google, a tab opens when you click Create and turns into the finished Google Doc or Slides deck when it's done. No copying and pasting.
-
-## Finding your own files
-Optional, in Settings: let the council search your whole Google Drive (read-only) and/or one folder on your Mac. When your own notes, syllabus, prices or drafts would help, a cheap model searches by keyword, picks up to 3 files and attaches them; the answer shows which files it opened. Turn it off per question with the **My files** switch. It can read, never change or delete. Searching all of Drive needs wider Google permission than the Drive button, so Google shows an "unverified app" warning and may ask you to sign in again weekly.
+Quick checks without new searches, Standard checks with search, Deep always checks and runs up to two rounds.
 
 **Power:** Auto (default) has a tiny model read each question and pick Economy (Claude Sonnet 5.5 + Gemini 3.8 Flash) for everyday questions or Max (Claude Opus 5.5 + Gemini 4 Argon) for hard or high-stakes ones. You can also force Economy or Max.
 
