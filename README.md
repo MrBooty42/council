@@ -5,10 +5,7 @@ Ask one question and get one strong answer, fact-checked by a second AI. Claude 
 **Open the app:** https://mrbooty42.github.io/council/
 
 ## How it works
-1. **Route:** a tiny, cheap model reads the question and decides how much power it needs, and whether a fact-check would help.
-2. **Answer:** Claude thinks it through and writes the answer, with web search.
-3. **Fact-check:** Gemini checks the numbers, dates, rules, claims and sources with Google Search. It doesn't write its own answer. Math, writing and pure reasoning questions skip this step and get more thinking from Claude instead.
-4. **Fix:** if the check found real problems, Claude fixes them (and lists any point it disputes). Skipped if nothing was wrong.
+One answer, fact-checked by a second AI. Claude writes, Gemini checks the facts with Google Search, Claude fixes what's wrong. Auto picks cheap or max power per question. Create mode builds docs and slide decks and opens them in Google Docs/Slides or downloads Word/PowerPoint. Reads PDFs, Word, photos and your Google Drive.
 
 Quick checks without new searches, Standard checks with search, Deep always checks and runs up to two rounds.
 
