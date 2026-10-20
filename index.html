@@ -487,7 +487,7 @@ function claudeContent(prompt, files, cache) {
   parts.push({ type: "text", text: prompt });
   return parts;
 }
-async function callClaude({ system, prompt, search, onText, signal, files, tier, cache }) {
+async function callClaude({ system, prompt, search, fetchPages, onText, signal, files, tier, cache }) {
   tier = tier || TIERS.max;
   const messages = [{ role: "user", content: claudeContent(prompt, files, cache) }];
   const usage = { in: 0, out: 0, searches: 0, cacheWrite: 0, cacheRead: 0 };
@@ -500,6 +500,8 @@ async function callClaude({ system, prompt, search, onText, signal, files, tier,
       fallbacks: "default", system, messages,
     };
     if (search > 0) body.tools = [{ type: "web_search_20260209", name: "web_search", max_uses: search }];
+    // Web fetch opens links already in the conversation, e.g. the other debater's sources, to check what they say.
+    if (fetchPages > 0) (body.tools = body.tools || []).push({ type: "web_fetch_20260209", name: "web_fetch", max_uses: fetchPages, max_content_tokens: 6000 });
     let res;
     for (let attempt = 0; attempt < 3; attempt++) {
       res = await safeFetch("https://api.anthropic.com/v1/messages", {
@@ -532,6 +534,7 @@ async function callClaude({ system, prompt, search, onText, signal, files, tier,
         blocks[d.index] = b;
         if (b.type === "web_search_tool_result" && Array.isArray(b.content))
           for (const r of b.content) if (r.url) sources.push({ url: r.url, title: r.title });
+        if (b.type === "web_fetch_tool_result" && b.content?.url) sources.push({ url: b.content.url, title: b.content.content?.title || b.content.url });
       } else if (d.type === "content_block_delta") {
         const b = blocks[d.index]; const x = d.delta;
         if (!b) continue;
@@ -562,7 +565,7 @@ async function callClaude({ system, prompt, search, onText, signal, files, tier,
 }
 
 /* ---------- Gemini ---------- */
-async function callGemini({ system, prompt, search, onText, signal, files, gmodel, tier }) {
+async function callGemini({ system, prompt, search, fetchPages, onText, signal, files, gmodel, tier }) {
   const model = gmodel || settings.geminiModel;
   const parts = [];
   for (const f of files || []) {
@@ -578,6 +581,7 @@ async function callGemini({ system, prompt, search, onText, signal, files, gmode
   // Thinking tokens are most of Gemini's bill. Economy questions think briefly; Max lets the model decide.
   if (!tier || tier.model !== TIERS.max.model || tier.effort === "low") body.generationConfig.thinkingConfig = { thinkingLevel: "low" };
   if (search > 0) body.tools = [{ google_search: {} }];
+  if (fetchPages > 0) (body.tools = body.tools || []).push({ url_context: {} });
   let res;
   for (let attempt = 0; attempt < 3; attempt++) {
     res = await safeFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
@@ -589,6 +593,11 @@ async function callGemini({ system, prompt, search, onText, signal, files, gmode
       // A model that doesn't take a thinking level gets its own default instead of failing.
       const t = await res.clone().text().catch(() => "");
       if (/thinking/i.test(t)) { delete body.generationConfig.thinkingConfig; attempt--; continue; }
+    }
+    if (res.status === 400 && body.tools?.some(x => x.url_context)) {
+      // A model without URL reading still debates with search alone.
+      const t = await res.clone().text().catch(() => "");
+      if (/url_context|url context|tool/i.test(t)) { body.tools = body.tools.filter(x => !x.url_context); if (!body.tools.length) delete body.tools; attempt--; continue; }
     }
     if (res.status !== 500 && res.status !== 503) break;
     await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
@@ -685,7 +694,7 @@ Request: ${q.slice(0, 3000)}`,
       "2NR": `Final Negative rebuttal. No new arguments. Collapse to the one or two positions you are winning, extend them, point out what the Affirmative dropped, and weigh: why your impacts outweigh theirs (magnitude, probability, timeframe).`,
       "2AR": `Final Affirmative rebuttal, the last speech. No new arguments. Answer the 2NR, extend the contentions you are winning, and weigh why the Affirmative world is better.`,
     };
-    return `${ctx}Drew's request:\n${q}\n\nResolution: ${d.resolution}\n\nYou are the ${mine}. ${jobs[code]}\n\n${transcript ? `The debate so far:\n<<<\n${transcript}\n>>>\n\n` : ""}The point of this debate is the truth, not a win. Drew uses it to find out what actually holds up, so argue your side's strongest honest case and nothing more.\n- When the other side is right about something, say so plainly and move on. Conceding a true point costs you nothing; defending a false one misleads Drew.\n- If, after looking at the evidence, your side is mostly wrong, say that, and argue only the parts that genuinely survive.\n- No debate tricks: no spreading, no theory arguments, no exaggerated impacts, no attacking a weaker version of the other side's argument.\n\nFormat norms:\n- Every argument needs a claim, a warrant (why it's true) and evidence. Evidence is a "card": a short quote, the source and its date, with a link. Prefer primary, recent, authoritative sources. Never invent a source, quote or number.\n- Answer arguments by their numbers, and don't skip one that matters.\n- Rebuttals add no new arguments; new evidence only to answer arguments already made.\n- There is no length limit. Take the space the argument needs, and no more: no padding or repetition.\n- Speak to the judge, not to Drew. Use short headings. Start with a line "## ${code}".`;
+    return `${ctx}Drew's request:\n${q}\n\nResolution: ${d.resolution}\n\nYou are the ${mine}. ${jobs[code]}\n\n${transcript ? `The debate so far:\n<<<\n${transcript}\n>>>\n\n` : ""}The point of this debate is the truth, not a win. Drew uses it to find out what actually holds up, so argue your side's strongest honest case and nothing more.\n- When the other side is right about something, say so plainly and move on. Conceding a true point costs you nothing; defending a false one misleads Drew.\n- If, after looking at the evidence, your side is mostly wrong, say that, and argue only the parts that genuinely survive.\n- No debate tricks: no spreading, no theory arguments, no exaggerated impacts, no attacking a weaker version of the other side's argument.\n\nResearch: use whatever finds the truth: what you already know, web search, published research and literature, official data, books, expert sources, and Drew's attached files. Say which claims rest on your own knowledge rather than a source you checked.\n\nChecking evidence (the core of this debate):\n- Every argument needs a claim, a warrant (why it's true) and evidence. Evidence is a "card": an exact short quote, the source and its date, with a link. Prefer primary, recent, authoritative sources. Never invent a source, quote or number, and never stretch a source beyond what it says.\n- Check the other side's cards. Open their links when you can and look up what you can't open. Call out any source that doesn't say what they claim, overstates it (a correlation sold as a cause, one study sold as a consensus, a forecast sold as a fact), is cherry-picked, outdated, low quality, or can't be found. Put these under "## Evidence challenges", each with the card, what the source actually says, and how you checked.\n- Expect the same scrutiny. If the other side shows one of your cards was wrong or overstated, admit it and say what's left of the argument.\n\nFormat norms:\n- Answer arguments and evidence challenges by their numbers, and don't skip one that matters.\n- Rebuttals add no new arguments; new evidence only to answer arguments already made.\n- There is no length limit. Take the space the argument needs, and no more: no padding or repetition.\n- Speak to the judge, not to Drew. Use short headings. Start with a line "## ${code}".`;
   },
   ballot: (q, d, transcript) => `You are judging a policy-style debate. The debaters were two AIs; you are not told which argued which side, and one of them may have been you. Judge the substance, not style, speaking skill or who wrote it.
 
@@ -696,10 +705,10 @@ The debate:
 ${transcript}
 >>>
 
-How to decide: which side's position is closer to the truth, given the evidence and reasoning by the end? This is not about who debated better. An argument the other side failed to answer counts only if it is actually sound. Ignore new arguments made in rebuttals. Count evidence that is misquoted, unsupported or from a weak source for less, and say so. If both sides are partly right and neither clearly is, say so instead of forcing a winner.
+How to decide: which side's position is closer to the truth, given the evidence and reasoning by the end? This is not about who debated better. An argument the other side failed to answer counts only if it is actually sound. Ignore new arguments made in rebuttals. Weigh the evidence challenges heavily: a card shown to be misquoted, overstated, cherry-picked or unfindable counts against the side that used it, and an unanswered evidence challenge that is correct stands. Count weak or unsupported evidence for less, and say so. If both sides are partly right and neither clearly is, say so instead of forcing a winner.
 
-Reply with a first line that is exactly "DECISION: AFFIRMATIVE", "DECISION: NEGATIVE" or "DECISION: MIXED". Then "## Reason for decision": the arguments that decided it and why. Then "## What each side got wrong or missed": one or two lines per side.`,
-  debrief: (ctx, q, d, transcript, ballots) => `${ctx}Drew's request:\n${q}\n\nDrew had two AIs debate this resolution: ${d.resolution}\n\nThe debate:\n<<<\n${transcript}\n>>>\n\n${ballots ? `The judges' ballots (each judged blind):\n<<<\n${ballots}\n>>>\n\n` : "There were no judges this time, so say which side argued better and why.\n\n"}Write the debrief for Drew. He didn't watch the debate, so make it stand on its own. Don't say which AI argued which side.\n- Start with the bottom line in two or three sentences: what is actually true or best supported${d.paper ? ", above all how well his paper holds up" : ""}${ballots ? ", and the judges' decisions" : ""}. Your job is the best answer for Drew, not scoring the debate: if both sides got something wrong, or the truth is somewhere between them, say that.\n- "## What held up": the arguments that survived attack, with the best evidence.\n- "## What broke": the arguments that fell, and why.\n- "## Still unresolved": what neither side settled and what evidence would settle it.\n${d.paper ? `- "## Revision plan": numbered fixes in priority order. For each: what to change in the paper, which attack it answers, and the evidence or analysis to add.` : `- "## Where this leaves you": what to believe or do, with a confidence level.`}\nKeep the links to the strongest sources.`,
+Reply with a first line that is exactly "DECISION: AFFIRMATIVE", "DECISION: NEGATIVE" or "DECISION: MIXED". Then "## Reason for decision": the arguments that decided it and why. Then "## Evidence that failed": every card that turned out wrong or overstated, and who caught it. Then "## What each side got wrong or missed": one or two lines per side.`,
+  debrief: (ctx, q, d, transcript, ballots) => `${ctx}Drew's request:\n${q}\n\nDrew had two AIs debate this resolution: ${d.resolution}\n\nThe debate:\n<<<\n${transcript}\n>>>\n\n${ballots ? `The judges' ballots (each judged blind):\n<<<\n${ballots}\n>>>\n\n` : "There were no judges this time, so say which position held up better and why.\n\n"}Write the debrief for Drew in one or two mid-sized paragraphs at most, plain prose with no headings or lists. Refer to the sides as the Affirmative and the Negative. Cover what happened in the debate (the main clash, and any source either side caught being wrong or overstated), what truths it established${d.paper ? ", how well Drew's paper holds up and the most important things to fix" : ""}, and its conclusion${ballots ? ", including the judges' decisions" : ""}. Your job is the best answer for Drew, not scoring the debate: if both sides got something wrong, or the truth is somewhere between them, say that. Where the sides disagree about what a source says and it decides the conclusion, check it yourself. Keep the links to the strongest sources.`,
   // Create: the models split one piece of work instead of each doing all of it.
   pitch: (ctx, q) => `${ctx}Drew wants the council to make this:\n${q}\n\nPropose how to build it. Your partner is proposing separately; then one plan will be made that takes the better idea for each part, and the parts get split between you to write. Keep it short (under 250 words) and do not write the content yet:\n- A numbered list of 3 to 8 parts. For each: a title and one or two lines on what goes in it and how you would approach it.\n- One line on format and tone (who it is for, how long, how it should read).\nDo not search the web in this step.\nIf the task is unclear, assume the most useful reading and say so in one line.`,
   // The planner sees the proposals as A and B, in random order, so it judges ideas rather than authors.
@@ -1005,7 +1014,7 @@ async function runCouncil(convo, turnIndex) {
     const runOne = async who => {
       try {
         const r = await call(who, {
-          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, signal, files, tier: opts.fullEffort ? TIERS[turn.claudeTier] : tierFor(kind, files), gmodel: turn.geminiModel,
+          system: systemFor(who, turn), prompt: makePrompt(who), search: useSearch, fetchPages: opts.fetch || 0, signal, files, tier: opts.fullEffort ? TIERS[turn.claudeTier] : tierFor(kind, files), gmodel: turn.geminiModel,
           cache,
           onText: t => { step[who].text = t; view.updateVoice(step, who); },
         });
@@ -1094,15 +1103,18 @@ async function runCouncil(convo, turnIndex) {
     const d = { resolution: String(fr.json?.resolution || q).slice(0, 500), paper, aff, neg, rounds: order.length, side: code => code.endsWith("AC") || code.endsWith("AR") ? "aff" : "neg" };
     turn.debate = { resolution: d.resolution, paper, aff, neg };
     view.note(`Resolution: ${d.resolution} ${NAMES[aff]} affirms, ${NAMES[neg]} negates.`);
-    fileSearch = turn.search ? (turn.depth === 3 ? 4 : 3) : 0;
-    const searchFor = code => !turn.search ? 0 : /^1/.test(code) && code !== "1AR" ? (turn.depth === 3 ? 4 : 3) : code === "2AC" || code === "2NC" ? 2 : 0;
+    // Every speech can search and open links (the other side's sources included) to check them.
+    // The budgets are the same for every Claude step so an attached paper stays cached between speeches.
+    const searchFor = () => !turn.search ? 0 : turn.depth === 3 ? 5 : 4;
+    const fetchFor = () => !turn.search ? 0 : 3;
+    fileSearch = searchFor();
     const said = [];
     const transcript = () => said.map(x => `${x.code} (${x.side === "aff" ? "Affirmative" : "Negative"}):\n${x.text}`).join("\n\n");
     for (const code of order) {
       const who = d.side(code) === "aff" ? aff : neg;
       view.status(`${code}: ${NAMES[who]} for the ${d.side(code) === "aff" ? "Affirmative" : "Negative"}`);
       const label = `${code} · ${d.side(code) === "aff" ? "Affirmative" : "Negative"}`;
-      const text = (await pairStep(label, "opening", () => P.speech(ctx, q, d, code, transcript()), searchFor(code), files, [who], { fullEffort: true }))[who];
+      const text = (await pairStep(label, "opening", () => P.speech(ctx, q, d, code, transcript()), searchFor(), files, [who], { fullEffort: true, fetch: fetchFor() }))[who];
       said.push({ code, side: d.side(code), text });
     }
     let ballots = "";
@@ -1117,7 +1129,7 @@ async function runCouncil(convo, turnIndex) {
     const writer = "claude";
     view.status("Writing the debrief");
     turn.final = { text: "", by: writer };
-    const debrief = (await pairStep("Debrief", "revise", () => P.debrief(ctx, q, d, transcript(), ballots), 0, d.paper ? files : [], [writer], { fullEffort: true }))[writer];
+    const debrief = (await pairStep("Debrief", "revise", () => P.debrief(ctx, q, d, transcript(), ballots), searchFor(), files, [writer], { fullEffort: true, fetch: fetchFor() }))[writer];
     const all = []; for (const st of turn.steps) for (const w of ["claude", "gemini"]) for (const src of st[w].sources || []) all.push(src);
     turn.final = { text: `**Resolution:** ${d.resolution}\n\n${debrief}`, by: writer, sources: citedFirst(debrief, dedupe(all)) };
     turn.status = "done";
