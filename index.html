@@ -368,6 +368,7 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
   </div>
 </div>
 
+<script src="skills.js"></script>
 <script>
 "use strict";
 
@@ -622,8 +623,15 @@ const MODES = {
   business: "Mode: Business. Be commercially practical: use real numbers (costs, prices, margins, market size, time to results), name concrete next steps, and call out risks, legal or tax issues, and the most likely reasons this would fail. No motivational filler.",
   decision: "Mode: Life decision. Lay out the realistic options and the tradeoffs of each (money, time, risk, how reversible it is), say what information would change the answer, and end with a clear recommendation.",
 };
+// Study questions (not Create) get a tutoring guide; the router picks the math one or the general one.
+const MATHY = /\b(math|calculus|algebra|derivative|integral|equation|solve for|probability|statistic|regression|variance|standard deviation|matrix|NPV|IRR|present value|interest rate|break-?even|elasticity|accounting|depreciation)\b|\d\s*[-+*/^=]\s*\d/i;
+function studyMode(tutor) {
+  const guide = window.SKILLS?.[tutor === "math" ? "math" : "tutor"];
+  if (!guide) return MODES.study;
+  return `Mode: Study, with tutoring. Drew is a university student teaching himself this material. Follow the tutoring guide below. Where it conflicts with the council's answer format (direct answer first, a Confidence line), the guide wins: for example, if Drew is working a problem he has to solve himself, guide him instead of handing over the answer, unless he asks for it outright. If you are fact-checking a tutoring reply, don't flag a withheld answer or a question to Drew as missing; check that every explanation, hint, step and number is correct.\n\nTutoring guide:\n${guide}`;
+}
 function systemFor(me, turn) {
-  const extra = [MODES[turn?.mode] || "", settings.about ? `About Drew, in his own words:\n${settings.about}` : ""].filter(Boolean).join("\n\n");
+  const extra = [turn?.tutor ? studyMode(turn.tutor) : MODES[turn?.mode] || "", settings.about ? `About Drew, in his own words:\n${settings.about}` : ""].filter(Boolean).join("\n\n");
   return systemBase(me) + (extra ? "\n\n" + extra : "");
 }
 function systemBase(me) {
@@ -736,7 +744,8 @@ async function pickTier(turn, signal) {
   const fallbackLead = turn.judge === "gemini" ? "gemini" : "claude";
   if (!auto && !council && !(turn.who === "council" && turn.judge === "auto")) return { tier: turn.power, check: "check", lead: fallbackLead, cost: 0 };
   if (!settings.claudeKey) return { tier: auto ? "economy" : turn.power, check: "check", lead: fallbackLead, cost: 0 };
-  const prompt = `Read this question and reply with exactly three words.
+  const tutoring = turn.mode === "study" && turn.task !== "create";
+  const prompt = `Read this question and reply with exactly ${tutoring ? "four" : "three"} words.
 
 First word, how much reasoning power it needs:
 HEAVY: hard multi-step reasoning, advanced math, science or technical work, rigorous research across many sources, long or several attached documents, or high-stakes choices (large sums of money, legal, medical, signing contracts, major life decisions).
@@ -750,7 +759,11 @@ SOLO: writing, editing, brainstorming, explaining a concept, opinions and advice
 Third word, which AI should lead (write the answer):
 GEMINI: the answer mostly comes from fresh web search (news, current prices, local places and businesses, product or company lookups, recent research), or the question is about photos, video, audio, or long or several attached documents.
 CLAUDE: everything else, especially reasoning, careful writing, strategy, advice, explanations and analysis.
-
+${tutoring ? `
+Fourth word, which tutor fits:
+MATH: math, statistics, or calculations in finance, accounting or economics.
+GENERAL: any other subject.
+` : ""}
 Mode: ${turn.mode}. Attached files: ${turn.files?.length || 0}.${turn.task === "create" ? "\nThis is a request to make something (a document, guide or plan). Length alone does not make it HEAVY; judge by how hard the content is to get right." : ""}
 Question: ${turn.q.slice(0, 4000)}`;
   try {
@@ -764,7 +777,7 @@ Question: ${turn.q.slice(0, 4000)}`;
     const word = (j.content || []).map(b => b.text || "").join("").toUpperCase();
     const cost = ((j.usage?.input_tokens || 0) * PRICES[ROUTER_MODEL].in + (j.usage?.output_tokens || 0) * PRICES[ROUTER_MODEL].out) / 1e6;
     const check = word.includes("SOLVE") ? "solve" : word.includes("SOLO") ? "solo" : "check";
-    return { tier: auto ? (word.includes("HEAVY") ? "max" : "economy") : turn.power, check, lead: /\bGEMINI\b/.test(word) ? "gemini" : "claude", cost };
+    return { tier: auto ? (word.includes("HEAVY") ? "max" : "economy") : turn.power, check, lead: /\bGEMINI\b/.test(word) ? "gemini" : "claude", tutor: tutoring && /\b(MATH|GENERAL)\b/.test(word) ? (/\bMATH\b/.test(word) ? "math" : "general") : null, cost };
   } catch (e) {
     if (e.name === "AbortError") throw e;
     if (e.status === 401 || e.status === 403) throw e;
@@ -1040,8 +1053,9 @@ async function runCouncil(convo, turnIndex) {
     const pick = await pickTier(turn, signal);
     turn.claudeTier = pick.tier; turn.geminiModel = geminiFor(pick.tier);
     turn.route = pick.check;
+    if (turn.mode === "study" && turn.task !== "create") turn.tutor = pick.tutor || (MATHY.test(q) ? "math" : "general");
     turn.lead = turn.judge === "claude" || turn.judge === "gemini" ? turn.judge : pick.lead || "claude";
-    if (turn.who === "council" && turn.task !== "create") turn.checkPlan = pick.check === "solo" && turn.depth === 3 ? "check" : pick.check === "solve" && turn.depth === 1 ? "solo" : pick.check || "check";
+    if (turn.who === "council" && turn.task !== "create") turn.checkPlan = pick.check === "solo" && turn.depth === 3 ? "check" : pick.check === "solve" && turn.tutor ? (turn.depth === 1 ? "solo" : "check") : pick.check === "solve" && turn.depth === 1 ? "solo" : pick.check || "check";
     turn.cost += pick.cost; turn.costBy.claude += pick.cost;
     view.tier();
     if (turn._sources) await findMyFiles(turn, files, view, signal);
@@ -1317,7 +1331,8 @@ function renderTurn(convo, index, live) {
       const used = t.checkPlan === "solo" ? (t.final.by || "claude") : t.who;
       const models = [used !== "gemini" && TIERS[t.claudeTier]?.label, used !== "claude" && GEMINI_LABELS[t.geminiModel]].filter(Boolean).join(" + ");
       const tierName = t.claudeTier ? ` · ${t.claudeTier === "max" ? "Max" : "Economy"} power${t.power === "auto" ? " (auto)" : ""}: ${models}` : "";
-      meta.appendChild(el("span", null, how + (modeName ? ` · ${modeName} mode` : "") + tierName));
+      const tutorName = t.tutor ? ` (${t.tutor === "math" ? "math tutor" : "tutor"})` : "";
+      meta.appendChild(el("span", null, how + (modeName ? ` · ${modeName} mode${tutorName}` : "") + tierName));
       const spend = el("span", "spend");
       spend.append("Spent ≈ ", el("b", null, money(t.cost || 0)));
       if (t.costBy && (!t.who || t.who === "council") && t.checkPlan !== "solo") {
