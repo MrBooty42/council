@@ -13,6 +13,8 @@ Quick is the cheapest: math and logic get one solver thinking harder, and Claude
 
 In Create mode, the plan step sees both models' proposals as A and B in random order, so the best idea wins each part regardless of who wrote it.
 
+**Debate** (third switch next to Ask and Create): a policy-style debate to stress-test a hard question or a research paper. Attach the paper and ask the council to challenge it. A tiny model frames the resolution, sides are random, and each side argues with sourced evidence, with no length limit. The rule is truth over winning: each side concedes what's right, and judges decide which position is closer to the truth (or "mixed"), not who debated better. Quick = opening cases + debrief. Standard = five speeches, two blind ballots, debrief. Deep = all seven speeches with more research. The debrief says what held up, what broke and what's unresolved, plus a revision plan for a paper.
+
 **Study mode** tutors instead of just answering: concept questions get a straight explanation, problems you are working on get hints one step at a time, and work you paste gets checked. Math, statistics and finance or accounting questions get a math tutor; everything else gets a general one. The guides are adapted from the MIT-licensed "tutor" and "math-tutor" skills (see `skills.js`). Create mode in Study still makes full study guides.
 
 Also: PDF, Word, PowerPoint and photo uploads; attach from Google Drive (Docs, Slides, Sheets, any file); save results to Google Docs or Google Slides; Create mode can make a slide deck and download it as PowerPoint; solo mode (one model, much cheaper); a monthly spend tracker; Download for Word; history backup.

@@ -230,6 +230,7 @@ footer.composer { border-top: 1px solid var(--line); background: var(--surface);
         <span class="seg" id="taskSeg" role="group" aria-label="Ask or create">
           <button data-task="ask" aria-pressed="true" title="Ask a question; the models check each other and agree on the best answer">Ask</button>
           <button data-task="create" aria-pressed="false" title="Make something (study guide, report, business plan); the models split the work part by part">Create</button>
+          <button data-task="debate" aria-pressed="false" title="Policy-style debate: one model affirms, the other negates, then blind judges decide. Attach a paper to stress-test it.">Debate</button>
         </span>
         <label id="formatWrap" hidden>Make
           <select id="formatSel" aria-label="Output format">
@@ -664,6 +665,41 @@ const P = {
   solve: (ctx, q) => `${ctx}Drew's question:\n${q}\n\nSolve this yourself, carefully. Another AI is solving it separately and the two solutions will be compared, so do not hedge between answers: work it through step by step, check your work, and commit to one answer.\n\nFormat:\n- Start with the final answer in the first sentence or two.\n- Then the working or reasoning, as clearly as a good tutor would show it.\n- End with "## Confidence": one line saying High, Medium or Low, and what would change it.`,
   same: (q, a, b) => `Two AIs answered the same question separately. Do they reach the same final answer or conclusion? Ignore wording, formatting, rounding and the method used; only the substance of the final answer matters.\n\nReply with only this JSON: {"same": true} or {"same": false, "diff": "a few words on how they differ"}\n\nQuestion: ${q.slice(0, 2000)}\n\nAnswer A:\n${a.slice(0, 6000)}\n\nAnswer B:\n${b.slice(0, 6000)}`,
   reconcile: (ctx, q, a, b) => `${ctx}Drew's question:\n${q}\n\nTwo solutions were worked out separately and they disagree. You don't know who wrote which, and one of them may be your own; judge only the reasoning.\n\nSolution A:\n<<<\n${a}\n>>>\n\nSolution B:\n<<<\n${b}\n>>>\n\nFind the exact step where they part ways and work out which is right; redo that part yourself if needed. Then write the final answer for Drew: the correct answer first, then the clean working. If it truly can't be settled, say so and add "## Where the council disagrees" with one sentence for each side and which you would bet on. End with "## Confidence". Do not mention Solution A or B or that there were two solutions.`,
+  // Debate: policy-debate format. Speeches see the transcript so far; judges and the debrief see sides, not model names.
+  frame: (q, fileNames) => `Drew wants two AIs to hold a policy-style debate. Turn his request into one debatable resolution the Affirmative defends and the Negative attacks.
+
+If he wants an attached paper, study, essay or draft challenged, dissected or stress-tested, set "paper" to true and make the resolution: "The [paper's short title or topic] paper's central claims are sound and its conclusions follow from its evidence." Otherwise "paper" is false and the resolution is a clear, arguable statement of the question (a policy, a claim or a choice), worded so both sides have real ground.
+
+Reply with only this JSON: {"resolution": "...", "paper": true or false}
+
+Attached files: ${fileNames.join(", ") || "none"}
+Request: ${q.slice(0, 3000)}`,
+  speech: (ctx, q, d, code, transcript) => {
+    const side = d.side(code), mine = side === "aff" ? "Affirmative" : "Negative";
+    const jobs = {
+      "1AC": `First Affirmative constructive. Build the case for the resolution. ${d.paper ? "Defend the paper: its thesis, its method and data, its key evidence, and why its conclusions follow. Quote the paper where it helps." : "Lay out harms (what is at stake), inherency (why the status quo won't fix it), your plan or thesis, and solvency (why it works)."} Number your contentions (1, 2, 3).`,
+      "1NC": `First Negative constructive.${d.rounds > 2 ? ` Start with "## Cross-ex": up to three pointed questions the Affirmative must answer in its next speech.` : ""} Then attack the case line by line, by the Affirmative's numbers. ${d.paper ? "Go after method, data, causal claims, alternative explanations, how far the findings generalize, and important work it misses or misreads." : "Hit harms, inherency and solvency."} Add off-case positions only where they truly apply: a disadvantage (a harm the plan causes, with link and impact), a counterplan (a better, competing alternative), a kritik (a flawed assumption underneath), or topicality (if the Affirmative isn't defending the resolution). Label them DA 1, CP, K, T.`,
+      "2AC": `Second Affirmative constructive. Answer the cross-ex questions first, briefly. Then answer every Negative argument line by line; anything you drop is conceded. Extend your best contentions with new evidence where it answers their attacks.`,
+      "2NC": `Second Negative constructive (the start of the Negative block). Extend the Negative's strongest arguments, answer the 2AC line by line, and point out anything the Affirmative dropped.`,
+      "1AR": `First Affirmative rebuttal. No new arguments. Answer the Negative block line by line and keep alive the contentions you need to win.`,
+      "2NR": `Final Negative rebuttal. No new arguments. Collapse to the one or two positions you are winning, extend them, point out what the Affirmative dropped, and weigh: why your impacts outweigh theirs (magnitude, probability, timeframe).`,
+      "2AR": `Final Affirmative rebuttal, the last speech. No new arguments. Answer the 2NR, extend the contentions you are winning, and weigh why the Affirmative world is better.`,
+    };
+    return `${ctx}Drew's request:\n${q}\n\nResolution: ${d.resolution}\n\nYou are the ${mine}. ${jobs[code]}\n\n${transcript ? `The debate so far:\n<<<\n${transcript}\n>>>\n\n` : ""}The point of this debate is the truth, not a win. Drew uses it to find out what actually holds up, so argue your side's strongest honest case and nothing more.\n- When the other side is right about something, say so plainly and move on. Conceding a true point costs you nothing; defending a false one misleads Drew.\n- If, after looking at the evidence, your side is mostly wrong, say that, and argue only the parts that genuinely survive.\n- No debate tricks: no spreading, no theory arguments, no exaggerated impacts, no attacking a weaker version of the other side's argument.\n\nFormat norms:\n- Every argument needs a claim, a warrant (why it's true) and evidence. Evidence is a "card": a short quote, the source and its date, with a link. Prefer primary, recent, authoritative sources. Never invent a source, quote or number.\n- Answer arguments by their numbers, and don't skip one that matters.\n- Rebuttals add no new arguments; new evidence only to answer arguments already made.\n- There is no length limit. Take the space the argument needs, and no more: no padding or repetition.\n- Speak to the judge, not to Drew. Use short headings. Start with a line "## ${code}".`;
+  },
+  ballot: (q, d, transcript) => `You are judging a policy-style debate. The debaters were two AIs; you are not told which argued which side, and one of them may have been you. Judge the substance, not style, speaking skill or who wrote it.
+
+Resolution: ${d.resolution}
+
+The debate:
+<<<
+${transcript}
+>>>
+
+How to decide: which side's position is closer to the truth, given the evidence and reasoning by the end? This is not about who debated better. An argument the other side failed to answer counts only if it is actually sound. Ignore new arguments made in rebuttals. Count evidence that is misquoted, unsupported or from a weak source for less, and say so. If both sides are partly right and neither clearly is, say so instead of forcing a winner.
+
+Reply with a first line that is exactly "DECISION: AFFIRMATIVE", "DECISION: NEGATIVE" or "DECISION: MIXED". Then "## Reason for decision": the arguments that decided it and why. Then "## What each side got wrong or missed": one or two lines per side.`,
+  debrief: (ctx, q, d, transcript, ballots) => `${ctx}Drew's request:\n${q}\n\nDrew had two AIs debate this resolution: ${d.resolution}\n\nThe debate:\n<<<\n${transcript}\n>>>\n\n${ballots ? `The judges' ballots (each judged blind):\n<<<\n${ballots}\n>>>\n\n` : "There were no judges this time, so say which side argued better and why.\n\n"}Write the debrief for Drew. He didn't watch the debate, so make it stand on its own. Don't say which AI argued which side.\n- Start with the bottom line in two or three sentences: what is actually true or best supported${d.paper ? ", above all how well his paper holds up" : ""}${ballots ? ", and the judges' decisions" : ""}. Your job is the best answer for Drew, not scoring the debate: if both sides got something wrong, or the truth is somewhere between them, say that.\n- "## What held up": the arguments that survived attack, with the best evidence.\n- "## What broke": the arguments that fell, and why.\n- "## Still unresolved": what neither side settled and what evidence would settle it.\n${d.paper ? `- "## Revision plan": numbered fixes in priority order. For each: what to change in the paper, which attack it answers, and the evidence or analysis to add.` : `- "## Where this leaves you": what to believe or do, with a confidence level.`}\nKeep the links to the strongest sources.`,
   // Create: the models split one piece of work instead of each doing all of it.
   pitch: (ctx, q) => `${ctx}Drew wants the council to make this:\n${q}\n\nPropose how to build it. Your partner is proposing separately; then one plan will be made that takes the better idea for each part, and the parts get split between you to write. Keep it short (under 250 words) and do not write the content yet:\n- A numbered list of 3 to 8 parts. For each: a title and one or two lines on what goes in it and how you would approach it.\n- One line on format and tone (who it is for, how long, how it should read).\nDo not search the web in this step.\nIf the task is unclear, assume the most useful reading and say so in one line.`,
   // The planner sees the proposals as A and B, in random order, so it judges ideas rather than authors.
@@ -744,7 +780,7 @@ async function pickTier(turn, signal) {
   const fallbackLead = turn.judge === "gemini" ? "gemini" : "claude";
   if (!auto && !council && !(turn.who === "council" && turn.judge === "auto")) return { tier: turn.power, check: "check", lead: fallbackLead, cost: 0 };
   if (!settings.claudeKey) return { tier: auto ? "economy" : turn.power, check: "check", lead: fallbackLead, cost: 0 };
-  const tutoring = turn.mode === "study" && turn.task !== "create";
+  const tutoring = turn.mode === "study" && turn.task === "ask";
   const prompt = `Read this question and reply with exactly ${tutoring ? "four" : "three"} words.
 
 First word, how much reasoning power it needs:
@@ -1047,15 +1083,58 @@ async function runCouncil(convo, turnIndex) {
     view.status(`Built together in ${turn.steps.length} steps`, true);
   }
 
+  // Debate: sides are random; Quick = constructives only, Standard = 5 speeches, Deep = all 7.
+  async function runDebate(files) {
+    const aff = Math.random() < 0.5 ? "claude" : "gemini", neg = OTHER[aff];
+    view.status("Framing the resolution");
+    const fr = await cheapJSON(P.frame(q, turn.files || []), signal, 300).catch(e => { if (e.name === "AbortError") throw e; return { json: null, cost: 0 }; });
+    turn.cost += fr.cost; turn.costBy.claude += fr.cost;
+    const paper = typeof fr.json?.paper === "boolean" ? fr.json.paper : !!files.length && /\b(paper|study|thesis|essay|article|draft|manuscript)\b/i.test(q);
+    const order = { 1: ["1AC", "1NC"], 2: ["1AC", "1NC", "2AC", "2NR", "2AR"], 3: ["1AC", "1NC", "2AC", "2NC", "1AR", "2NR", "2AR"] }[turn.depth] || ["1AC", "1NC", "2AC", "2NR", "2AR"];
+    const d = { resolution: String(fr.json?.resolution || q).slice(0, 500), paper, aff, neg, rounds: order.length, side: code => code.endsWith("AC") || code.endsWith("AR") ? "aff" : "neg" };
+    turn.debate = { resolution: d.resolution, paper, aff, neg };
+    view.note(`Resolution: ${d.resolution} ${NAMES[aff]} affirms, ${NAMES[neg]} negates.`);
+    fileSearch = turn.search ? (turn.depth === 3 ? 4 : 3) : 0;
+    const searchFor = code => !turn.search ? 0 : /^1/.test(code) && code !== "1AR" ? (turn.depth === 3 ? 4 : 3) : code === "2AC" || code === "2NC" ? 2 : 0;
+    const said = [];
+    const transcript = () => said.map(x => `${x.code} (${x.side === "aff" ? "Affirmative" : "Negative"}):\n${x.text}`).join("\n\n");
+    for (const code of order) {
+      const who = d.side(code) === "aff" ? aff : neg;
+      view.status(`${code}: ${NAMES[who]} for the ${d.side(code) === "aff" ? "Affirmative" : "Negative"}`);
+      const label = `${code} · ${d.side(code) === "aff" ? "Affirmative" : "Negative"}`;
+      const text = (await pairStep(label, "opening", () => P.speech(ctx, q, d, code, transcript()), searchFor(code), files, [who], { fullEffort: true }))[who];
+      said.push({ code, side: d.side(code), text });
+    }
+    let ballots = "";
+    if (order.length > 2) {
+      view.status("Two judges are deciding, without knowing who argued which side");
+      const b = await pairStep("Ballots", "critique", () => P.ballot(q, d, transcript()), 0, [], ["claude", "gemini"], { cache: false });
+      const vote = t => /DECISION:\s*NEG/i.test(t) ? "neg" : /DECISION:\s*AFF/i.test(t) ? "aff" : /DECISION:\s*MIX/i.test(t) ? "mixed" : null;
+      const votes = [vote(b.claude), vote(b.gemini)].filter(Boolean);
+      turn.debate.votes = { aff: votes.filter(v => v === "aff").length, neg: votes.filter(v => v === "neg").length, mixed: votes.filter(v => v === "mixed").length };
+      ballots = ["claude", "gemini"].map((w, i) => `Judge ${i + 1}:\n${b[w]}`).join("\n\n");
+    }
+    const writer = "claude";
+    view.status("Writing the debrief");
+    turn.final = { text: "", by: writer };
+    const debrief = (await pairStep("Debrief", "revise", () => P.debrief(ctx, q, d, transcript(), ballots), 0, d.paper ? files : [], [writer], { fullEffort: true }))[writer];
+    const all = []; for (const st of turn.steps) for (const w of ["claude", "gemini"]) for (const src of st[w].sources || []) all.push(src);
+    turn.final = { text: `**Resolution:** ${d.resolution}\n\n${debrief}`, by: writer, sources: citedFirst(debrief, dedupe(all)) };
+    turn.status = "done";
+    view.showFinal(); view.updateFinal(true);
+    const v = turn.debate.votes;
+    view.status(v ? `Debate done: ${voteText(v)}` : "Debate done", true);
+  }
+
   try {
     const files = turn._files || [];
     view.status("Choosing how much power this question needs");
     const pick = await pickTier(turn, signal);
     turn.claudeTier = pick.tier; turn.geminiModel = geminiFor(pick.tier);
     turn.route = pick.check;
-    if (turn.mode === "study" && turn.task !== "create") turn.tutor = pick.tutor || (MATHY.test(q) ? "math" : "general");
+    if (turn.mode === "study" && turn.task === "ask") turn.tutor = pick.tutor || (MATHY.test(q) ? "math" : "general");
     turn.lead = turn.judge === "claude" || turn.judge === "gemini" ? turn.judge : pick.lead || "claude";
-    if (turn.who === "council" && turn.task !== "create") turn.checkPlan = pick.check === "solo" && turn.depth === 3 ? "check" : pick.check === "solve" && turn.tutor ? (turn.depth === 1 ? "solo" : "check") : pick.check === "solve" && turn.depth === 1 ? "solo" : pick.check || "check";
+    if (turn.who === "council" && turn.task === "ask") turn.checkPlan = pick.check === "solo" && turn.depth === 3 ? "check" : pick.check === "solve" && turn.tutor ? (turn.depth === 1 ? "solo" : "check") : pick.check === "solve" && turn.depth === 1 ? "solo" : pick.check || "check";
     turn.cost += pick.cost; turn.costBy.claude += pick.cost;
     view.tier();
     if (turn._sources) await findMyFiles(turn, files, view, signal);
@@ -1076,6 +1155,7 @@ async function runCouncil(convo, turnIndex) {
       return;
     }
     if (turn.task === "create") { await buildTogether(files); return; }
+    if (turn.task === "debate") { await runDebate(files); return; }
     const writer = turn.lead, checker = OTHER[writer];
     const all = () => { const out = []; for (const st of turn.steps) for (const w of ["claude", "gemini"]) for (const src of st[w].sources || []) out.push(src); return dedupe(out); };
     const finish = (text, by) => {
@@ -1162,6 +1242,10 @@ async function runCouncil(convo, turnIndex) {
     saveConvos();
   }
 }
+function voteText(v) {
+  const parts = [v.aff && `${v.aff} for the Affirmative`, v.neg && `${v.neg} for the Negative`, v.mixed && `${v.mixed} mixed`].filter(Boolean);
+  return parts.length ? `judges: ${parts.join(", ")}` : "no clear ballots";
+}
 function dedupe(list) { const seen = new Set(); return (list || []).filter(s => s.url && !seen.has(s.url) && seen.add(s.url)); }
 
 /* ---------- Rendering ---------- */
@@ -1199,13 +1283,25 @@ function renderThread() {
 
 function renderEmpty() {
   const wrap = el("div", "empty");
-  const create = settings.task === "create";
-  if (create) {
+  const debate = settings.task === "debate";
+  const create = settings.task === "create" || debate;
+  if (debate) {
+    wrap.appendChild(el("h1", null, "Two models argue it out, to find what holds up."));
+    wrap.appendChild(el("p", null, "Ask a hard question, or attach a research paper (yours or anyone's) and ask the council to challenge it. One model affirms, the other negates, policy-debate style, with evidence. The goal is the truth, not a win: each side concedes what's right. Then two judges decide without knowing who argued which side, and you get a debrief, with a revision plan if it was a paper."));
+    const how1 = el("div", "howto");
+    [["1 · Resolution", "A tiny model turns your request into a debatable statement and picks sides at random."],
+     ["2 · Constructives", "Each side builds its case with sourced evidence."],
+     ["3 · Rebuttals", "They answer each other point by point. Quick skips this."],
+     ["4 · Judges + debrief", "Two blind ballots, then what held up, what broke, and what to do."]]
+      .forEach(([b, x]) => { const d = el("div"); d.appendChild(el("b", null, b)); d.appendChild(el("span", null, x)); how1.appendChild(d); });
+    wrap.appendChild(how1);
+  }
+  if (create && !debate) {
     wrap.appendChild(el("h1", null, "Two models build it together."));
     wrap.appendChild(el("p", null, "Describe what you need made: a study guide, a paper outline, a business plan, a pitch. Claude and Gemini each pitch ideas, the best idea wins each part, and each model writes only its own parts, so you pay for the work once."));
   }
   const how0 = el("div", "howto");
-  if (create) {
+  if (create && !debate) {
     [["1 · Ideas", "Both pitch a short outline."],
      ["2 · Plan", "The better idea wins each part, and each part gets one writer."],
      ["3 · Write", "Each writes only its parts, at the same time."],
@@ -1229,7 +1325,10 @@ function renderEmpty() {
     n.appendChild(b); wrap.appendChild(n);
   }
   const ex = el("div", "examples");
-  (create ? ["Make a study guide from my attached lecture notes, with key terms, worked examples and practice questions.",
+  (debate ? ["Challenge my attached research paper: find the weakest claims and what would fix them.",
+   "Should the US raise the federal minimum wage to $17 an hour?",
+   "Does remote work make companies less productive?"]
+  : create ? ["Make a study guide from my attached lecture notes, with key terms, worked examples and practice questions.",
    "Write a one-page business plan for adding ceramic coating to my mobile detailing business in Kansas City.",
    "Draft an outline and thesis for a 10-page paper on how AI is changing small-business marketing."]
   : ["Is it smarter to pay down my 6% student loan or invest the extra $500 a month?",
@@ -1313,7 +1412,7 @@ function renderTurn(convo, index, live) {
   }
   function drawFinal() {
     finalBox.innerHTML = "";
-    const label = el("div", "label", made ? "Council work" : "Council answer");
+    const label = el("div", "label", t.task === "debate" ? "Debate debrief" : made ? "Council work" : "Council answer");
     finalBox.appendChild(label);
     finalBox.appendChild(md(t.final?.text || "…"));
     if (t.status === "done") {
@@ -1322,7 +1421,9 @@ function renderTurn(convo, index, live) {
       const counts = t.plan ? ["claude", "gemini"].map(w => [w, t.plan.parts.filter(p => p.writer === w).length]).filter(x => x[1]) : [];
       const split = counts.length > 1 ? `Built together: ${counts.map(([w, n]) => `${NAMES[w]} wrote ${n}`).join(", ")} of ${t.plan.parts.length} parts`
         : counts.length ? `Written by ${NAMES[counts[0][0]]} from both models' ideas` : "Built together";
-      const how = t.who && t.who !== "council" ? `${made ? "Made" : "Answered"} by ${NAMES[t.who]} alone`
+      const dv = t.debate;
+      const how = dv ? `Debate: ${NAMES[dv.aff]} affirmed, ${NAMES[dv.neg]} negated · ${dv.votes ? voteText(dv.votes) : "no judges on Quick"} · ${["", "Quick", "Standard", "Deep"][t.depth]}`
+        : t.who && t.who !== "council" ? `${made ? "Made" : "Answered"} by ${NAMES[t.who]} alone`
         : made ? `${split} · ${["", "Quick", "Standard", "Deep"][t.depth]}`
         : t.checkPlan === "solo" ? `Answered by ${NAMES[t.final.by]} · ${t.route === "solve" ? "solved alone on Quick" : "no check needed (writing or advice)"}`
         : t.checkPlan === "solve" ? (t.checkResult === "agree" ? `Solved separately by both · same answer` : `Solved separately by both · answers differed, ${NAMES[t.final.by]} settled it`)
@@ -1405,7 +1506,7 @@ $("#sendBtn").onclick = () => running ? running.abort() : ask();
 
 function setRunning(on) {
   const b = $("#sendBtn");
-  b.textContent = on ? "Stop" : settings.task === "create" ? "Create" : "Ask";
+  b.textContent = on ? "Stop" : settings.task === "debate" ? "Debate" : settings.task === "create" ? "Create" : "Ask";
   b.classList.toggle("stop", on);
 }
 
@@ -1518,7 +1619,7 @@ async function ask() {
   const tab = deliverTo === "google" ? openWaitingTab() : null;
   if (deliverTo === "google") { try { await googleToken(); } catch (e) { if (tab) tab.close(); deliverTo = "file"; showWarn(e.message + " It'll download as a file instead."); } }
   const sources = await fileSources();
-  c.turns.push({ q, _sources: sources, _tab: tab, deliver: deliverTo, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.who, power: settings.power, task: settings.task, format: settings.task === "create" ? settings.format : "doc",
+  c.turns.push({ q, _sources: sources, _tab: tab, deliver: deliverTo, steps: [], depth: settings.depth, search: settings.search, judge: settings.judge, mode: settings.mode, who: settings.task === "debate" ? "council" : settings.who, power: settings.power, task: settings.task, format: settings.task === "create" ? settings.format : "doc",
     files: files.map(f => f.name), _files: files, status: "running" });
   input.value = ""; autosize();
   saveConvos(); renderList();
@@ -1549,7 +1650,9 @@ $("#myFilesToggle").addEventListener("change", e => { settings.myFiles = e.targe
 function syncOpts() {
   document.querySelectorAll("#depthSeg button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.depth === settings.depth)));
   document.querySelectorAll("#whoSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.who === settings.who)));
-  $("#depthSeg").hidden = settings.who !== "council";
+  const debating = settings.task === "debate";
+  $("#depthSeg").hidden = settings.who !== "council" && !debating;
+  $("#whoSeg").hidden = debating;
   $("#modeSel").value = settings.mode;
   $("#powerSel").value = settings.power;
   $("#searchToggle").checked = settings.search;
@@ -1558,12 +1661,13 @@ function syncOpts() {
   $("#formatWrap").hidden = !create; $("#formatSel").value = settings.format || "doc";
   $("#deliverWrap").hidden = !create; $("#deliverSel").value = settings.deliver || "google";
   document.querySelectorAll("#taskSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.task === settings.task)));
-  const tips = create ? ["Write it, no cross-check (cheapest)", "Write it, then check each other's parts", "More research per part, then check"]
+  const tips = debating ? ["Opening cases only, then a debrief (cheapest)", "Five speeches, two blind judges, then a debrief", "All seven speeches, more research, two blind judges"]
+    : create ? ["Write it, no cross-check (cheapest)", "Write it, then check each other's parts", "More research per part, then check"]
     : ["Cheapest: math and logic get one solver, Claude checks without new searches", "Checks with web search; math and logic solved by both", "Never answers alone; fact-checks up to two rounds"];
   document.querySelectorAll("#depthSeg button").forEach(b => b.title = tips[+b.dataset.depth - 1]);
-  input.placeholder = create ? (settings.who === "council" ? "Describe what to make: study guide, paper, business plan…" : `Describe what ${NAMES[settings.who]} should make…`)
+  input.placeholder = debating ? "A tough question, or attach a paper and say what to challenge…" : create ? (settings.who === "council" ? "Describe what to make: study guide, paper, business plan…" : `Describe what ${NAMES[settings.who]} should make…`)
     : settings.who === "council" ? "Ask the council anything…" : `Ask ${NAMES[settings.who]} anything…`;
-  if (!running) $("#sendBtn").textContent = create ? "Create" : "Ask";
+  if (!running) $("#sendBtn").textContent = debating ? "Debate" : create ? "Create" : "Ask";
 }
 
 /* ---------- Downloads ---------- */
